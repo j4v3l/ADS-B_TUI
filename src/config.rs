@@ -1,0 +1,632 @@
+use anyhow::{anyhow, Context, Result};
+use serde::Deserialize;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+pub const DEFAULT_URL: &str = "http://adsb.local/data/aircraft.json";
+pub const DEFAULT_REFRESH_SECS: u64 = 2;
+pub const DEFAULT_STALE_SECS: u64 = 60;
+pub const DEFAULT_LOW_NIC: i64 = 5;
+pub const DEFAULT_LOW_NAC: i64 = 8;
+pub const DEFAULT_TRAIL_LEN: u64 = 6;
+pub const DEFAULT_FAVORITES_FILE: &str = "adsb-favorites.txt";
+pub const DEFAULT_ROUTE_BASE: &str = "https://api.adsb.lol";
+pub const DEFAULT_ROUTE_TTL_SECS: u64 = 3600;
+pub const DEFAULT_ROUTE_REFRESH_SECS: u64 = 15;
+pub const DEFAULT_ROUTE_BATCH: u64 = 20;
+pub const DEFAULT_ROUTE_TIMEOUT_SECS: u64 = 6;
+pub const DEFAULT_ROUTE_MODE: &str = "tar1090";
+pub const DEFAULT_ROUTE_PATH: &str = "tar1090/data/routes.json";
+pub const DEFAULT_UI_FPS: u64 = 10;
+pub const DEFAULT_SMOOTH_MODE: bool = true;
+pub const DEFAULT_SMOOTH_MERGE: bool = true;
+pub const DEFAULT_RATE_WINDOW_MS: u64 = 300;
+pub const DEFAULT_RATE_MIN_SECS: f64 = 0.25;
+pub const DEFAULT_NOTIFY_RADIUS_MI: f64 = 10.0;
+pub const DEFAULT_OVERPASS_MI: f64 = 0.5;
+pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub url: String,
+    pub refresh: Duration,
+    pub insecure: bool,
+    pub stale_secs: u64,
+    pub low_nic: i64,
+    pub low_nac: i64,
+    pub trail_len: u64,
+    pub favorites: Vec<String>,
+    pub favorites_file: String,
+    pub filter: String,
+    pub layout: String,
+    pub theme: String,
+    pub site_lat: Option<f64>,
+    pub site_lon: Option<f64>,
+    pub site_alt_m: Option<f64>,
+    pub route_enabled: bool,
+    pub route_base: String,
+    pub route_ttl_secs: u64,
+    pub route_refresh_secs: u64,
+    pub route_batch: u64,
+    pub route_timeout_secs: u64,
+    pub route_mode: String,
+    pub route_path: String,
+    pub ui_fps: u64,
+    pub smooth_mode: bool,
+    pub smooth_merge: bool,
+    pub rate_window_ms: u64,
+    pub rate_min_secs: f64,
+    pub notify_radius_mi: f64,
+    pub overpass_mi: f64,
+    pub notify_cooldown_secs: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+    url: Option<String>,
+    refresh_secs: Option<u64>,
+    insecure: Option<bool>,
+    stale_secs: Option<u64>,
+    low_nic: Option<i64>,
+    low_nac: Option<i64>,
+    trail_len: Option<u64>,
+    favorites: Option<Vec<String>>,
+    favorites_file: Option<String>,
+    filter: Option<String>,
+    layout: Option<String>,
+    theme: Option<String>,
+    site_lat: Option<f64>,
+    site_lon: Option<f64>,
+    site_alt_m: Option<f64>,
+    route_enabled: Option<bool>,
+    route_base: Option<String>,
+    route_ttl_secs: Option<u64>,
+    route_refresh_secs: Option<u64>,
+    route_batch: Option<u64>,
+    route_timeout_secs: Option<u64>,
+    route_mode: Option<String>,
+    route_path: Option<String>,
+    ui_fps: Option<u64>,
+    smooth_mode: Option<bool>,
+    smooth_merge: Option<bool>,
+    rate_window_ms: Option<u64>,
+    rate_min_secs: Option<f64>,
+    notify_radius_mi: Option<f64>,
+    overpass_mi: Option<f64>,
+    notify_cooldown_secs: Option<u64>,
+}
+
+pub fn parse_args() -> Result<Config> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    let mut explicit_config: Option<PathBuf> = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--config" {
+            let value = iter
+                .next()
+                .ok_or_else(|| anyhow!("--config needs a value"))?;
+            explicit_config = Some(PathBuf::from(value));
+        }
+    }
+
+    let env_config = env::var("ADSB_CONFIG").ok().map(PathBuf::from);
+    let config_path = explicit_config
+        .clone()
+        .or(env_config)
+        .unwrap_or_else(|| PathBuf::from("adsb-tui.toml"));
+
+    let mut config = Config {
+        url: DEFAULT_URL.to_string(),
+        refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
+        insecure: false,
+        stale_secs: DEFAULT_STALE_SECS,
+        low_nic: DEFAULT_LOW_NIC,
+        low_nac: DEFAULT_LOW_NAC,
+        trail_len: DEFAULT_TRAIL_LEN,
+        favorites: Vec::new(),
+        favorites_file: DEFAULT_FAVORITES_FILE.to_string(),
+        filter: String::new(),
+        layout: "full".to_string(),
+        theme: "default".to_string(),
+        site_lat: None,
+        site_lon: None,
+        site_alt_m: None,
+        route_enabled: true,
+        route_base: DEFAULT_ROUTE_BASE.to_string(),
+        route_ttl_secs: DEFAULT_ROUTE_TTL_SECS,
+        route_refresh_secs: DEFAULT_ROUTE_REFRESH_SECS,
+        route_batch: DEFAULT_ROUTE_BATCH,
+        route_timeout_secs: DEFAULT_ROUTE_TIMEOUT_SECS,
+        route_mode: DEFAULT_ROUTE_MODE.to_string(),
+        route_path: DEFAULT_ROUTE_PATH.to_string(),
+        ui_fps: DEFAULT_UI_FPS,
+        smooth_mode: DEFAULT_SMOOTH_MODE,
+        smooth_merge: DEFAULT_SMOOTH_MERGE,
+        rate_window_ms: DEFAULT_RATE_WINDOW_MS,
+        rate_min_secs: DEFAULT_RATE_MIN_SECS,
+        notify_radius_mi: DEFAULT_NOTIFY_RADIUS_MI,
+        overpass_mi: DEFAULT_OVERPASS_MI,
+        notify_cooldown_secs: DEFAULT_NOTIFY_COOLDOWN_SECS,
+    };
+
+    if config_path.exists() {
+        if let Some(file_config) = load_file_config(&config_path)? {
+            apply_file_config(&mut config, file_config);
+        }
+    } else if explicit_config.is_some() {
+        return Err(anyhow!("Config file not found: {}", config_path.display()));
+    }
+
+    if let Ok(url) = env::var("ADSB_URL") {
+        config.url = url;
+    }
+    if let Ok(value) = env::var("ADSB_REFRESH") {
+        if let Ok(secs) = value.parse::<u64>() {
+            config.refresh = Duration::from_secs(secs);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_INSECURE") {
+        config.insecure = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_STALE_SECS") {
+        if let Ok(secs) = value.parse::<u64>() {
+            config.stale_secs = secs.max(1);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_LOW_NIC") {
+        if let Ok(val) = value.parse::<i64>() {
+            config.low_nic = val;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_LOW_NAC") {
+        if let Ok(val) = value.parse::<i64>() {
+            config.low_nac = val;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_TRAIL_LEN") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.trail_len = val.max(1);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_FILTER") {
+        config.filter = value;
+    }
+    if let Ok(value) = env::var("ADSB_FAVORITES") {
+        config.favorites = value
+            .split(',')
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect();
+    }
+    if let Ok(value) = env::var("ADSB_FAVORITES_FILE") {
+        config.favorites_file = value;
+    }
+    if let Ok(value) = env::var("ADSB_LAYOUT") {
+        config.layout = value;
+    }
+    if let Ok(value) = env::var("ADSB_THEME") {
+        config.theme = value;
+    }
+    if let Ok(value) = env::var("ADSB_SITE_LAT") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.site_lat = Some(val);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_SITE_LON") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.site_lon = Some(val);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_SITE_ALT_M") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.site_alt_m = Some(val);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_ENABLED") {
+        config.route_enabled = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_BASE") {
+        config.route_base = value;
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_TTL") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.route_ttl_secs = val;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_REFRESH") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.route_refresh_secs = val;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_BATCH") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.route_batch = val.max(1);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_TIMEOUT") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.route_timeout_secs = val.max(2);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_MODE") {
+        config.route_mode = value;
+    }
+    if let Ok(value) = env::var("ADSB_ROUTE_PATH") {
+        config.route_path = value;
+    }
+    if let Ok(value) = env::var("ADSB_UI_FPS") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.ui_fps = val;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_SMOOTH") {
+        config.smooth_mode = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_SMOOTH_MERGE") {
+        config.smooth_merge = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_RATE_WINDOW_MS") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.rate_window_ms = val.max(50);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_RATE_MIN_SECS") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.rate_min_secs = val.max(0.05);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_NOTIFY_MI") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.notify_radius_mi = val.max(0.1);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_OVERPASS_MI") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.overpass_mi = val.max(0.05);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_NOTIFY_COOLDOWN") {
+        if let Ok(val) = value.parse::<u64>() {
+            config.notify_cooldown_secs = val.max(10);
+        }
+    }
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--config" => {
+                iter.next();
+            }
+            "--url" => {
+                config.url = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--url needs a value"))?
+                    .to_string();
+            }
+            "--refresh" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--refresh needs a value"))?;
+                let secs: u64 = value.parse()?;
+                config.refresh = Duration::from_secs(secs);
+            }
+            "--insecure" => {
+                config.insecure = true;
+            }
+            "--stale" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--stale needs a value"))?;
+                let secs: u64 = value.parse()?;
+                config.stale_secs = secs.max(1);
+            }
+            "--low-nic" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--low-nic needs a value"))?;
+                config.low_nic = value.parse()?;
+            }
+            "--low-nac" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--low-nac needs a value"))?;
+                config.low_nac = value.parse()?;
+            }
+            "--trail" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--trail needs a value"))?;
+                let len: u64 = value.parse()?;
+                config.trail_len = len.max(1);
+            }
+            "--filter" => {
+                config.filter = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--filter needs a value"))?
+                    .to_string();
+            }
+            "--favorite" => {
+                if let Some(value) = iter.next() {
+                    config.favorites.push(value.to_string());
+                } else {
+                    return Err(anyhow!("--favorite needs a value"));
+                }
+            }
+            "--favorites-file" => {
+                config.favorites_file = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--favorites-file needs a value"))?
+                    .to_string();
+            }
+            "--layout" => {
+                config.layout = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--layout needs a value"))?
+                    .to_string();
+            }
+            "--theme" => {
+                config.theme = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--theme needs a value"))?
+                    .to_string();
+            }
+            "--site-lat" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--site-lat needs a value"))?;
+                config.site_lat = Some(value.parse()?);
+            }
+            "--site-lon" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--site-lon needs a value"))?;
+                config.site_lon = Some(value.parse()?);
+            }
+            "--site-alt-m" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--site-alt-m needs a value"))?;
+                config.site_alt_m = Some(value.parse()?);
+            }
+            "--route-base" => {
+                config.route_base = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-base needs a value"))?
+                    .to_string();
+            }
+            "--route-ttl" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-ttl needs a value"))?;
+                let val: u64 = value.parse()?;
+                config.route_ttl_secs = val;
+            }
+            "--route-refresh" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-refresh needs a value"))?;
+                let val: u64 = value.parse()?;
+                config.route_refresh_secs = val;
+            }
+            "--route-batch" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-batch needs a value"))?;
+                let val: u64 = value.parse()?;
+                config.route_batch = val.max(1);
+            }
+            "--route-timeout" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-timeout needs a value"))?;
+                let val: u64 = value.parse()?;
+                config.route_timeout_secs = val.max(2);
+            }
+            "--route-disable" => {
+                config.route_enabled = false;
+            }
+            "--route-mode" => {
+                config.route_mode = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-mode needs a value"))?
+                    .to_string();
+            }
+            "--route-path" => {
+                config.route_path = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--route-path needs a value"))?
+                    .to_string();
+            }
+            "--ui-fps" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--ui-fps needs a value"))?;
+                config.ui_fps = value.parse()?;
+            }
+            "--smooth" => {
+                config.smooth_mode = true;
+            }
+            "--no-smooth" => {
+                config.smooth_mode = false;
+            }
+            "--smooth-merge" => {
+                config.smooth_merge = true;
+            }
+            "--no-smooth-merge" => {
+                config.smooth_merge = false;
+            }
+            "--rate-window-ms" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--rate-window-ms needs a value"))?;
+                config.rate_window_ms = value.parse::<u64>()?.max(50);
+            }
+            "--rate-min-secs" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--rate-min-secs needs a value"))?;
+                config.rate_min_secs = value.parse::<f64>()?.max(0.05);
+            }
+            "--notify-mi" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--notify-mi needs a value"))?;
+                config.notify_radius_mi = value.parse::<f64>()?.max(0.1);
+            }
+            "--overpass-mi" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--overpass-mi needs a value"))?;
+                config.overpass_mi = value.parse::<f64>()?.max(0.05);
+            }
+            "--notify-cooldown" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--notify-cooldown needs a value"))?;
+                config.notify_cooldown_secs = value.parse::<u64>()?.max(10);
+            }
+            "-h" | "--help" => {
+                print_help();
+                std::process::exit(0);
+            }
+            other => {
+                return Err(anyhow!("Unknown argument: {other}"));
+            }
+        }
+    }
+
+    Ok(config)
+}
+
+fn load_file_config(path: &Path) -> Result<Option<FileConfig>> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config: {}", path.display()))?;
+    let cfg: FileConfig = toml::from_str(&content)
+        .with_context(|| format!("Failed to parse config: {}", path.display()))?;
+    Ok(Some(cfg))
+}
+
+fn apply_file_config(target: &mut Config, file: FileConfig) {
+    if let Some(url) = file.url {
+        target.url = url;
+    }
+    if let Some(refresh) = file.refresh_secs {
+        target.refresh = Duration::from_secs(refresh);
+    }
+    if let Some(insecure) = file.insecure {
+        target.insecure = insecure;
+    }
+    if let Some(stale_secs) = file.stale_secs {
+        target.stale_secs = stale_secs.max(1);
+    }
+    if let Some(low_nic) = file.low_nic {
+        target.low_nic = low_nic;
+    }
+    if let Some(low_nac) = file.low_nac {
+        target.low_nac = low_nac;
+    }
+    if let Some(trail_len) = file.trail_len {
+        target.trail_len = trail_len.max(1);
+    }
+    if let Some(favorites) = file.favorites {
+        target.favorites = favorites;
+    }
+    if let Some(favorites_file) = file.favorites_file {
+        target.favorites_file = favorites_file;
+    }
+    if let Some(filter) = file.filter {
+        target.filter = filter;
+    }
+    if let Some(layout) = file.layout {
+        target.layout = layout;
+    }
+    if let Some(theme) = file.theme {
+        target.theme = theme;
+    }
+    if let Some(site_lat) = file.site_lat {
+        target.site_lat = Some(site_lat);
+    }
+    if let Some(site_lon) = file.site_lon {
+        target.site_lon = Some(site_lon);
+    }
+    if let Some(site_alt_m) = file.site_alt_m {
+        target.site_alt_m = Some(site_alt_m);
+    }
+    if let Some(route_enabled) = file.route_enabled {
+        target.route_enabled = route_enabled;
+    }
+    if let Some(route_base) = file.route_base {
+        target.route_base = route_base;
+    }
+    if let Some(route_ttl_secs) = file.route_ttl_secs {
+        target.route_ttl_secs = route_ttl_secs;
+    }
+    if let Some(route_refresh_secs) = file.route_refresh_secs {
+        target.route_refresh_secs = route_refresh_secs;
+    }
+    if let Some(route_batch) = file.route_batch {
+        target.route_batch = route_batch.max(1);
+    }
+    if let Some(route_timeout_secs) = file.route_timeout_secs {
+        target.route_timeout_secs = route_timeout_secs.max(2);
+    }
+    if let Some(route_mode) = file.route_mode {
+        target.route_mode = route_mode;
+    }
+    if let Some(route_path) = file.route_path {
+        target.route_path = route_path;
+    }
+    if let Some(ui_fps) = file.ui_fps {
+        target.ui_fps = ui_fps;
+    }
+    if let Some(smooth_mode) = file.smooth_mode {
+        target.smooth_mode = smooth_mode;
+    }
+    if let Some(smooth_merge) = file.smooth_merge {
+        target.smooth_merge = smooth_merge;
+    }
+    if let Some(rate_window_ms) = file.rate_window_ms {
+        target.rate_window_ms = rate_window_ms.max(50);
+    }
+    if let Some(rate_min_secs) = file.rate_min_secs {
+        target.rate_min_secs = rate_min_secs.max(0.05);
+    }
+    if let Some(notify_radius_mi) = file.notify_radius_mi {
+        target.notify_radius_mi = notify_radius_mi.max(0.1);
+    }
+    if let Some(overpass_mi) = file.overpass_mi {
+        target.overpass_mi = overpass_mi.max(0.05);
+    }
+    if let Some(notify_cooldown_secs) = file.notify_cooldown_secs {
+        target.notify_cooldown_secs = notify_cooldown_secs.max(10);
+    }
+}
+
+fn print_help() {
+    println!("adsb-tui");
+    println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
+    println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
+    println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
+    println!("       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]");
+    println!("       [--site-lat LAT] [--site-lon LON] [--site-alt-m METERS]");
+    println!("       [--route-base URL] [--route-ttl SECS] [--route-refresh SECS]");
+    println!("       [--route-batch N] [--route-timeout SECS] [--route-disable]");
+    println!("       [--route-mode tar1090|routeset] [--route-path PATH]");
+    println!("       [--ui-fps FPS] [--smooth] [--no-smooth] [--smooth-merge] [--no-smooth-merge]");
+    println!("       [--rate-window-ms MS] [--rate-min-secs SECS]");
+    println!("       [--notify-mi MILES] [--overpass-mi MILES] [--notify-cooldown SECS]");
+    println!("Environment: ADSB_URL overrides the default URL");
+    println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
+    println!("Environment: ADSB_CONFIG overrides config path");
+    println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
+    println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
+    println!("Environment: ADSB_SITE_LAT/LON/ALT_M set receiver location");
+    println!("Environment: ADSB_ROUTE_* configure route lookups");
+    println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");
+    println!("Environment: ADSB_RATE_WINDOW_MS ADSB_RATE_MIN_SECS control msg rate smoothing");
+    println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
+    println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
+    println!("      t theme | l layout | e export csv | E export json");
+}
