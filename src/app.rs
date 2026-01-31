@@ -147,6 +147,7 @@ pub enum ColumnId {
     Seen,
     Msgs,
     Hex,
+    Flag,
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +272,8 @@ pub struct App {
     pub(crate) route_batch: usize,
     pub(crate) altitude_trend_arrows: bool,
     pub(crate) track_arrows: bool,
+    #[allow(dead_code)]
+    pub(crate) flags_enabled: bool,
     pub(crate) route_last_poll: Option<SystemTime>,
     pub(crate) route_cache: HashMap<String, RouteInfo>,
     pub(crate) route_last_request: HashMap<String, SystemTime>,
@@ -331,6 +334,7 @@ impl App {
         notify_cooldown: Duration,
         altitude_trend_arrows: bool,
         track_arrows: bool,
+        flags_enabled: bool,
     ) -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -377,7 +381,13 @@ impl App {
             config_status: None,
             trail_len: trail_len.max(1),
             site,
-            columns: default_columns(),
+            columns: {
+                let mut cols = default_columns();
+                if let Some(flag_col) = cols.iter_mut().find(|c| c.id == ColumnId::Flag) {
+                    flag_col.visible = flags_enabled;
+                }
+                cols
+            },
             column_cursor: 0,
             smooth_mode,
             smooth_merge,
@@ -391,6 +401,7 @@ impl App {
             route_batch: route_batch.max(1),
             altitude_trend_arrows,
             track_arrows,
+            flags_enabled,
             route_last_poll: None,
             route_cache: HashMap::new(),
             route_last_request: HashMap::new(),
@@ -1555,6 +1566,12 @@ fn default_columns() -> Vec<ColumnConfig> {
             width: 6,
             visible: true,
         },
+        ColumnConfig {
+            id: ColumnId::Flag,
+            label: "FLAG",
+            width: 2,
+            visible: true,
+        },
     ]
 }
 
@@ -1702,6 +1719,11 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         "column_cache",
         ConfigKind::Bool,
         config::DEFAULT_COLUMN_CACHE.to_string(),
+    );
+    push_item(
+        "flags_enabled",
+        ConfigKind::Bool,
+        config::DEFAULT_FLAGS_ENABLED.to_string(),
     );
 
     items

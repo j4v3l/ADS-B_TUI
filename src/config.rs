@@ -30,6 +30,7 @@ pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_ALTITUDE_TREND_ARROWS: bool = true;
 pub const DEFAULT_COLUMN_CACHE: bool = true;
 pub const DEFAULT_TRACK_ARROWS: bool = true;
+pub const DEFAULT_FLAGS_ENABLED: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -68,6 +69,7 @@ pub struct Config {
     pub altitude_trend_arrows: bool,
     pub column_cache: bool,
     pub track_arrows: bool,
+    pub flags_enabled: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -106,6 +108,7 @@ struct FileConfig {
     altitude_trend_arrows: Option<bool>,
     column_cache: Option<bool>,
     track_arrows: Option<bool>,
+    flags_enabled: Option<bool>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -163,6 +166,7 @@ pub fn parse_args() -> Result<Config> {
         altitude_trend_arrows: DEFAULT_ALTITUDE_TREND_ARROWS,
         column_cache: DEFAULT_COLUMN_CACHE,
         track_arrows: DEFAULT_TRACK_ARROWS,
+        flags_enabled: DEFAULT_FLAGS_ENABLED,
     };
 
     if config_path.exists() {
@@ -653,6 +657,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     }
     if let Some(track_arrows) = file.track_arrows {
         target.track_arrows = track_arrows;
+    }
+    if let Some(flags_enabled) = file.flags_enabled {
+        target.flags_enabled = flags_enabled;
     }
 }
 

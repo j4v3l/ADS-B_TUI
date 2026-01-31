@@ -111,6 +111,7 @@ fn main() -> Result<()> {
             Duration::from_secs(config.notify_cooldown_secs),
             config.altitude_trend_arrows,
             config.track_arrows,
+            config.flags_enabled,
         ),
         rx,
         route_channels,
