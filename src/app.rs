@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 use toml::Value;
+use toml_edit::DocumentMut;
 
 use crate::config;
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
@@ -192,6 +193,15 @@ pub struct ConfigItem {
 }
 
 #[derive(Clone, Debug)]
+struct ColumnWidthCache {
+    width: u16,
+    cols: Vec<ColumnId>,
+    rows_len: usize,
+    at: SystemTime,
+    widths: Vec<u16>,
+}
+
+#[derive(Clone, Debug)]
 pub struct RouteInfo {
     pub origin: Option<String>,
     pub destination: Option<String>,
@@ -228,6 +238,9 @@ pub struct App {
     pub(crate) input_mode: InputMode,
     pub(crate) layout_mode: LayoutMode,
     pub(crate) theme_mode: ThemeMode,
+    pub(crate) column_cache_enabled: bool,
+    pub(crate) column_cache_ttl: Duration,
+    column_width_cache: Option<ColumnWidthCache>,
     pub(crate) config_path: PathBuf,
     pub(crate) config_items: Vec<ConfigItem>,
     pub(crate) config_cursor: usize,
@@ -286,6 +299,8 @@ impl App {
         filter: String,
         layout_mode: LayoutMode,
         theme_mode: ThemeMode,
+        column_cache_enabled: bool,
+        column_cache_ttl: Duration,
         config_path: PathBuf,
         trail_len: usize,
         favorites_path: Option<PathBuf>,
@@ -335,6 +350,13 @@ impl App {
             input_mode: InputMode::Normal,
             layout_mode,
             theme_mode,
+            column_cache_enabled,
+            column_cache_ttl: if column_cache_ttl.is_zero() {
+                Duration::from_millis(400)
+            } else {
+                column_cache_ttl
+            },
+            column_width_cache: None,
             config_path,
             config_items: Vec::new(),
             config_cursor: 0,
@@ -531,37 +553,32 @@ impl App {
     }
 
     pub fn save_config(&mut self) {
-        let mut table = toml::value::Table::new();
+        let existing = fs::read_to_string(&self.config_path).unwrap_or_default();
+        let mut doc = existing.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
+
         for item in &self.config_items {
             match parse_config_value(item.kind, item.value.trim()) {
                 Ok(Some(value)) => {
-                    table.insert(item.key.to_string(), value);
+                    doc[item.key] = to_edit_value(value);
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    doc.remove(item.key);
+                }
                 Err(err) => {
                     self.config_status = Some((err, SystemTime::now()));
                     return;
                 }
             }
         }
-        let value = Value::Table(table);
-        match toml::to_string_pretty(&value) {
-            Ok(text) => {
-                if let Err(err) = fs::write(&self.config_path, text) {
-                    self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
-                } else {
-                    self.config_status = Some((
-                        format!(
-                            "saved {} (restart to apply)",
-                            self.config_path.display()
-                        ),
-                        SystemTime::now(),
-                    ));
-                }
-            }
-            Err(err) => {
-                self.config_status = Some((format!("serialize failed: {err}"), SystemTime::now()));
-            }
+
+        let text = doc.to_string();
+        if let Err(err) = fs::write(&self.config_path, text) {
+            self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
+        } else {
+            self.config_status = Some((
+                format!("saved {} (restart to apply)", self.config_path.display()),
+                SystemTime::now(),
+            ));
         }
     }
 
@@ -606,6 +623,50 @@ impl App {
 
     pub fn column_cursor(&self) -> usize {
         self.column_cursor
+    }
+
+    pub fn column_cache_lookup(
+        &self,
+        width: u16,
+        cols: &[ColumnId],
+        rows_len: usize,
+        now: SystemTime,
+    ) -> Option<Vec<u16>> {
+        if !self.column_cache_enabled {
+            return None;
+        }
+        let cache = self.column_width_cache.as_ref()?;
+        if cache.width != width || cache.rows_len != rows_len || cache.cols != cols {
+            return None;
+        }
+        if now
+            .duration_since(cache.at)
+            .map(|d| d > self.column_cache_ttl)
+            .unwrap_or(true)
+        {
+            return None;
+        }
+        Some(cache.widths.clone())
+    }
+
+    pub fn column_cache_store(
+        &mut self,
+        width: u16,
+        cols: Vec<ColumnId>,
+        rows_len: usize,
+        widths: Vec<u16>,
+        now: SystemTime,
+    ) {
+        if !self.column_cache_enabled {
+            return;
+        }
+        self.column_width_cache = Some(ColumnWidthCache {
+            width,
+            cols,
+            rows_len,
+            at: now,
+            widths,
+        });
     }
 
     pub fn set_table_area(&mut self, area: Rect, header_rows: u16) {
@@ -1458,6 +1519,8 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         ConfigKind::Int,
         config::DEFAULT_TRAIL_LEN.to_string(),
     );
+    push_item("favorites_file", ConfigKind::Str, config::DEFAULT_FAVORITES_FILE.to_string());
+    push_item("filter", ConfigKind::Str, "".to_string());
     push_item("layout", ConfigKind::Str, "full".to_string());
     push_item("theme", ConfigKind::Str, "default".to_string());
     push_item("site_lat", ConfigKind::Float, "".to_string());
@@ -1539,6 +1602,16 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         ConfigKind::Int,
         config::DEFAULT_NOTIFY_COOLDOWN_SECS.to_string(),
     );
+    push_item(
+        "altitude_trend_arrows",
+        ConfigKind::Bool,
+        config::DEFAULT_ALTITUDE_TREND_ARROWS.to_string(),
+    );
+    push_item(
+        "column_cache",
+        ConfigKind::Bool,
+        config::DEFAULT_COLUMN_CACHE.to_string(),
+    );
 
     items
 }
@@ -1578,5 +1651,34 @@ fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, Stri
             Ok(value) => Ok(Some(Value::Float(value))),
             Err(_) => Err(format!("invalid float for {}", text)),
         },
+    }
+}
+
+fn to_edit_value(value: Value) -> toml_edit::Item {
+    match value {
+        Value::String(s) => toml_edit::value(s),
+        Value::Integer(i) => toml_edit::value(i),
+        Value::Float(f) => toml_edit::value(f),
+        Value::Boolean(b) => toml_edit::value(b),
+        Value::Array(arr) => {
+            let mut array = toml_edit::Array::new();
+            for item in arr {
+                if let Some(val) = toml_value_to_edit(item) {
+                    array.push(val);
+                }
+            }
+            toml_edit::Item::Value(toml_edit::Value::Array(array))
+        }
+        _ => toml_edit::Item::None,
+    }
+}
+
+fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
+    match value {
+        Value::String(s) => Some(toml_edit::Value::from(s)),
+        Value::Integer(i) => Some(toml_edit::Value::from(i)),
+        Value::Float(f) => Some(toml_edit::Value::from(f)),
+        Value::Boolean(b) => Some(toml_edit::Value::from(b)),
+        _ => None,
     }
 }
