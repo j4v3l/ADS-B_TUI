@@ -188,7 +188,7 @@ pub enum ConfigKind {
 
 #[derive(Clone, Debug)]
 pub struct ConfigItem {
-    pub key: &'static str,
+    pub key: String,
     pub value: String,
     pub kind: ConfigKind,
 }
@@ -588,10 +588,10 @@ impl App {
         for item in &self.config_items {
             match parse_config_value(item.kind, item.value.trim()) {
                 Ok(Some(value)) => {
-                    doc[item.key] = to_edit_value(value);
+                    doc[item.key.as_str()] = to_edit_value(value);
                 }
                 Ok(None) => {
-                    doc.remove(item.key);
+                    doc.remove(item.key.as_str());
                 }
                 Err(err) => {
                     self.config_status = Some((err, SystemTime::now()));
@@ -1581,14 +1581,38 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         .and_then(|content| toml::from_str::<Value>(&content).ok());
     let table = file_value.and_then(|value| value.as_table().cloned());
 
+    if let Some(map) = table.as_ref() {
+        let mut items = Vec::new();
+        for (key, value) in map {
+            let kind = match value {
+                Value::String(_) => ConfigKind::Str,
+                Value::Integer(_) => ConfigKind::Int,
+                Value::Float(_) => ConfigKind::Float,
+                Value::Boolean(_) => ConfigKind::Bool,
+                _ => ConfigKind::Str,
+            };
+            let value = toml_value_to_string(value).unwrap_or_else(|| value.to_string());
+            items.push(ConfigItem {
+                key: key.to_string(),
+                value,
+                kind,
+            });
+        }
+        items.sort_by(|a, b| a.key.cmp(&b.key));
+        return items;
+    }
+
+    default_config_items()
+}
+
+fn default_config_items() -> Vec<ConfigItem> {
     let mut items = Vec::new();
-    let mut push_item = |key: &'static str, kind: ConfigKind, default: String| {
-        let value = table
-            .as_ref()
-            .and_then(|t| t.get(key))
-            .and_then(toml_value_to_string)
-            .unwrap_or(default);
-        items.push(ConfigItem { key, value, kind });
+    let mut push_item = |key: &str, kind: ConfigKind, default: String| {
+        items.push(ConfigItem {
+            key: key.to_string(),
+            value: default,
+            kind,
+        });
     };
 
     push_item("url", ConfigKind::Str, config::DEFAULT_URL.to_string());

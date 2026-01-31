@@ -185,6 +185,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[s]Sort ", Style::default().fg(theme.dim)),
         Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
         Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
+        Span::styled("[C]Config ", Style::default().fg(theme.dim)),
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
@@ -870,32 +871,52 @@ fn render_columns_menu(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
-    let popup = centered_rect(64, 18, area);
+    let popup = centered_rect(70, 20, area);
 
     f.render_widget(Clear, popup);
 
     let lines = vec![
         Line::from(Span::styled(
-            "Keys",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
+            "HELP",
+            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
         )),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  ↑/↓        Move selection"),
+        Line::from("  Mouse      Scroll to move • Click row to select"),
         Line::from(""),
-        Line::from("q           Quit"),
-        Line::from("Up/Down     Move selection"),
-        Line::from("s           Sort (SEEN/ALT/SPD)"),
-        Line::from("/           Filter (Enter apply, Esc cancel, Ctrl+U clear)"),
-        Line::from("c           Clear filter"),
-        Line::from("f           Toggle favorite (auto-saves)"),
-        Line::from("m           Columns menu"),
-        Line::from("t           Theme toggle"),
-        Line::from("l           Layout toggle"),
-        Line::from("e           Export CSV (visible rows)"),
-        Line::from("E           Export JSON (raw feed)"),
-        Line::from("? or h      Toggle help"),
-        Line::from("C           Config editor"),
-        Line::from("Mouse       Scroll to move • Click row to select"),
+        Line::from(Span::styled(
+            "Display",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  s          Sort (SEEN/ALT/SPD)"),
+        Line::from("  l          Toggle layout"),
+        Line::from("  t          Toggle theme"),
+        Line::from("  m          Columns menu"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Filter & Favorites",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  /          Filter (Enter apply, Esc cancel, Ctrl+U clear)"),
+        Line::from("  c          Clear filter"),
+        Line::from("  f          Toggle favorite (auto-saves)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Export & Config",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  e / E      Export CSV / JSON"),
+        Line::from("  C          Config editor"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Quit",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  q          Quit"),
+        Line::from("  ? / h      Toggle help"),
         Line::from(""),
         Line::from(Span::styled(
             "Press Esc to close",
@@ -921,13 +942,6 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(Clear, popup);
 
-    let key_width = app
-        .config_items
-        .iter()
-        .map(|item| item.key.len())
-        .max()
-        .unwrap_or(8);
-
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
         format!("CONFIG {}", app.config_path.display()),
@@ -937,7 +951,35 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
     )));
     lines.push(Line::from(""));
 
-    for (i, item) in app.config_items.iter().enumerate() {
+    let status_visible = app
+        .config_status
+        .as_ref()
+        .and_then(|(_, when)| SystemTime::now().duration_since(*when).ok())
+        .map(|d| d.as_secs() <= 5)
+        .unwrap_or(false);
+    let reserved = 4 + if status_visible { 1 } else { 0 };
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let total_items = app.config_items.len();
+    let mut start = if total_items > items_height {
+        app.config_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+    let key_width = app
+        .config_items
+        .iter()
+        .skip(start)
+        .take(items_height)
+        .map(|item| item.key.len())
+        .max()
+        .unwrap_or(8)
+        .min(24);
+
+    for (i, item) in app.config_items.iter().enumerate().take(end).skip(start) {
         let mut value = item.value.clone();
         if app.config_editing && i == app.config_cursor {
             value = format!("{}_", app.config_edit);
@@ -958,12 +1000,8 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
     }
 
     lines.push(Line::from(""));
-    if let Some((msg, when)) = &app.config_status {
-        if SystemTime::now()
-            .duration_since(*when)
-            .map(|d| d.as_secs() <= 5)
-            .unwrap_or(true)
-        {
+    if let Some((msg, _)) = &app.config_status {
+        if status_visible {
             lines.push(Line::from(Span::styled(
                 msg,
                 Style::default().fg(theme.warn),
@@ -971,7 +1009,12 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
         }
     }
     lines.push(Line::from(Span::styled(
-        "Up/Down select • Enter edit/apply • w save • Esc close",
+        format!(
+            "Up/Down select • Enter edit/apply • w save • Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
         Style::default().fg(theme.dim),
     )));
 
