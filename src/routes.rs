@@ -83,19 +83,18 @@ fn fetch_routeset(
     let mut last_err = None;
 
     let payloads = vec![
-        serde_json::json!(callsigns),
-        serde_json::json!({ "callsigns": callsigns }),
-        serde_json::json!({ "callsign": callsigns }),
         serde_json::json!({
             "planes": batch.iter().map(|req| {
                 serde_json::json!({
                     "callsign": req.callsign.trim().to_ascii_uppercase(),
-                    "flight": req.callsign.trim().to_ascii_uppercase(),
                     "lat": req.lat,
-                    "lon": req.lon
+                    "lng": req.lon
                 })
             }).collect::<Vec<_>>()
         }),
+        serde_json::json!(callsigns),
+        serde_json::json!({ "callsigns": callsigns }),
+        serde_json::json!({ "callsign": callsigns }),
     ];
 
     for payload in payloads {
@@ -141,7 +140,8 @@ fn post_payload(
     if !status.is_success() {
         return Err(format!("Route HTTP {}", status));
     }
-    resp.json::<Value>().map_err(|err| err.to_string())
+    let body: Value = resp.json::<Value>().map_err(|err| err.to_string())?;
+    Ok(body)
 }
 
 fn parse_routes(body: Value) -> Vec<RouteResult> {
@@ -213,7 +213,7 @@ fn parse_route_object(value: &Value, key_callsign: Option<&String>) -> Option<Ro
         .or_else(|| key_callsign.cloned())
         .map(|v| v.trim().to_string())?;
 
-    let route_text = extract_string(obj, &["route", "flightroute"]);
+    let route_text = extract_string(obj, &["route", "flightroute", "_airport_codes_iata", "airport_codes"]);
     let origin = extract_string(obj, &["origin", "orig", "from", "departure", "dep"]);
     let destination = extract_string(obj, &["destination", "dest", "to", "arrival", "arr"]);
     let alt_origin = extract_string(obj, &["airport1", "from_iata", "from_icao"]);
