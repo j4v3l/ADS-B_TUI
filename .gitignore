@@ -1,0 +1,17 @@
+/target
+/exports
+
+# Local snapshots/config
+adsb-snapshot-*.csv
+adsb-snapshot-*.json
+adsb-favorites.txt
+adsb-tui.toml
+
+# OS/editor
+.DS_Store
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+*.log
