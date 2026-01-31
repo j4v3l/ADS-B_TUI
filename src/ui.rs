@@ -268,7 +268,7 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let now = SystemTime::now();
     let visible = indices.len();
     let total = app.data.aircraft.len();
-    let msg_rate = app.msg_rate;
+    let msg_rate = app.msg_rate_display();
     let kbps = msg_rate.map(|rate| rate * 112.0 / 1000.0);
     let uptime = now
         .duration_since(app.start_time)
@@ -513,6 +513,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 route,
                 &theme,
                 app.site(),
+                app.altitude_trend_arrows,
             )
         });
 
@@ -897,12 +898,12 @@ fn fmt_f64(value: Option<f64>, width: usize, precision: usize) -> String {
     }
 }
 
-fn fmt_i64_trend(value: Option<i64>, trend: TrendDir, width: usize) -> String {
+fn fmt_i64_trend(value: Option<i64>, trend: TrendDir, show_trend: bool, width: usize) -> String {
     let base = match value {
         Some(v) => v.to_string(),
         None => "--".to_string(),
     };
-    let arrow = trend_char(trend);
+    let arrow = if show_trend { trend_char(trend) } else { ' ' };
     let text = format!("{base}{arrow}");
     if width > 0 {
         format!("{text:>width$}", width = width)
@@ -927,9 +928,9 @@ fn fmt_f64_trend(value: Option<f64>, trend: TrendDir, width: usize, precision: u
 
 fn trend_char(trend: TrendDir) -> char {
     match trend {
-        TrendDir::Up => '^',
-        TrendDir::Down => 'v',
-        TrendDir::Flat => '-',
+        TrendDir::Up => '↑',
+        TrendDir::Down => '↓',
+        TrendDir::Flat => '→',
         TrendDir::Unknown => ' ',
     }
 }
@@ -1113,7 +1114,7 @@ fn compute_column_widths(
                 ColumnId::Reg => fmt_text(ac.r.as_deref()),
                 ColumnId::Type => fmt_text(ac.t.as_deref()),
                 ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
-                ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, 0),
+                ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0),
                 ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
                 ColumnId::Trk => fmt_f64(ac.track, 0, 0),
                 ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
@@ -1202,6 +1203,7 @@ fn cell_for_column(
     route: Option<&crate::app::RouteInfo>,
     theme: &Theme,
     site: Option<SiteLocation>,
+    altitude_trend_arrows: bool,
 ) -> Cell<'static> {
     let mut text = match id {
         ColumnId::Fav => {
@@ -1215,7 +1217,7 @@ fn cell_for_column(
         ColumnId::Reg => fmt_text(ac.r.as_deref()),
         ColumnId::Type => fmt_text(ac.t.as_deref()),
         ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
-        ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, 0),
+        ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, altitude_trend_arrows, 0),
         ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
         ColumnId::Trk => fmt_f64(ac.track, 0, 0),
         ColumnId::Lat => fmt_f64(ac.lat, 0, 2),

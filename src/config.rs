@@ -27,6 +27,7 @@ pub const DEFAULT_RATE_MIN_SECS: f64 = 0.25;
 pub const DEFAULT_NOTIFY_RADIUS_MI: f64 = 10.0;
 pub const DEFAULT_OVERPASS_MI: f64 = 0.5;
 pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
+pub const DEFAULT_ALTITUDE_TREND_ARROWS: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -61,6 +62,7 @@ pub struct Config {
     pub notify_radius_mi: f64,
     pub overpass_mi: f64,
     pub notify_cooldown_secs: u64,
+    pub altitude_trend_arrows: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -96,6 +98,7 @@ struct FileConfig {
     notify_radius_mi: Option<f64>,
     overpass_mi: Option<f64>,
     notify_cooldown_secs: Option<u64>,
+    altitude_trend_arrows: Option<bool>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -149,6 +152,7 @@ pub fn parse_args() -> Result<Config> {
         notify_radius_mi: DEFAULT_NOTIFY_RADIUS_MI,
         overpass_mi: DEFAULT_OVERPASS_MI,
         notify_cooldown_secs: DEFAULT_NOTIFY_COOLDOWN_SECS,
+        altitude_trend_arrows: DEFAULT_ALTITUDE_TREND_ARROWS,
     };
 
     if config_path.exists() {
@@ -457,6 +461,12 @@ pub fn parse_args() -> Result<Config> {
             "--no-smooth-merge" => {
                 config.smooth_merge = false;
             }
+            "--alt-arrows" => {
+                config.altitude_trend_arrows = true;
+            }
+            "--no-alt-arrows" => {
+                config.altitude_trend_arrows = false;
+            }
             "--rate-window-ms" => {
                 let value = iter
                     .next()
@@ -602,6 +612,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(notify_cooldown_secs) = file.notify_cooldown_secs {
         target.notify_cooldown_secs = notify_cooldown_secs.max(10);
     }
+    if let Some(altitude_trend_arrows) = file.altitude_trend_arrows {
+        target.altitude_trend_arrows = altitude_trend_arrows;
+    }
 }
 
 fn print_help() {
@@ -617,6 +630,7 @@ fn print_help() {
     println!("       [--ui-fps FPS] [--smooth] [--no-smooth] [--smooth-merge] [--no-smooth-merge]");
     println!("       [--rate-window-ms MS] [--rate-min-secs SECS]");
     println!("       [--notify-mi MILES] [--overpass-mi MILES] [--notify-cooldown SECS]");
+    println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("Environment: ADSB_URL overrides the default URL");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
     println!("Environment: ADSB_CONFIG overrides config path");

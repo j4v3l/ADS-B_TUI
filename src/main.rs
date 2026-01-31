@@ -106,6 +106,7 @@ fn main() -> Result<()> {
             config.notify_radius_mi,
             config.overpass_mi,
             Duration::from_secs(config.notify_cooldown_secs),
+            config.altitude_trend_arrows,
         ),
         rx,
         route_channels,

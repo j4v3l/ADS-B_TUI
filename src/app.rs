@@ -223,10 +223,12 @@ pub struct App {
     pub(crate) route_ttl: Duration,
     pub(crate) route_refresh: Duration,
     pub(crate) route_batch: usize,
+    pub(crate) altitude_trend_arrows: bool,
     pub(crate) route_last_poll: Option<SystemTime>,
     pub(crate) route_cache: HashMap<String, RouteInfo>,
     pub(crate) route_last_request: HashMap<String, SystemTime>,
     pub(crate) msg_rate: Option<f64>,
+    msg_rate_display: Option<f64>,
     msg_rate_ema: Option<f64>,
     msg_rate_last_display: Option<SystemTime>,
     msg_rate_window: Duration,
@@ -275,6 +277,7 @@ impl App {
         notify_radius_mi: f64,
         overpass_mi: f64,
         notify_cooldown: Duration,
+        altitude_trend_arrows: bool,
     ) -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -320,10 +323,12 @@ impl App {
             route_ttl,
             route_refresh,
             route_batch: route_batch.max(1),
+            altitude_trend_arrows,
             route_last_poll: None,
             route_cache: HashMap::new(),
             route_last_request: HashMap::new(),
             msg_rate: None,
+            msg_rate_display: None,
             msg_rate_ema: None,
             msg_rate_last_display: None,
             msg_rate_window: if rate_window.is_zero() {
@@ -672,6 +677,10 @@ impl App {
         self.route_tar1090
     }
 
+    pub fn msg_rate_display(&self) -> Option<f64> {
+        self.msg_rate.or(self.msg_rate_display)
+    }
+
     pub fn route_refresh_due(&mut self, now: SystemTime) -> bool {
         if self.route_refresh.as_secs() == 0 && self.route_refresh.subsec_nanos() == 0 {
             return true;
@@ -812,14 +821,6 @@ impl App {
     }
 
     fn update_rate(&mut self, data: &ApiResponse, now_time: SystemTime) {
-        let hold = {
-            let mut value = self.msg_rate_window + self.msg_rate_window;
-            if value < Duration::from_secs(2) {
-                value = Duration::from_secs(2);
-            }
-            value
-        };
-
         if let Some(messages) = data.messages {
             if let Some(last_total) = self.last_msg_total {
                 if messages < last_total {
@@ -857,20 +858,12 @@ impl App {
                     };
                     self.msg_rate_ema = Some(ema);
                     self.msg_rate = Some(ema);
+                    self.msg_rate_display = Some(ema);
                     self.msg_rate_last_display = Some(now_time);
                 }
             }
-        } else if let Some(last) = self.msg_rate_last_display {
-            if now_time
-                .duration_since(last)
-                .map(|d| d > hold)
-                .unwrap_or(true)
-            {
-                self.msg_rate = None;
-                self.msg_rate_ema = None;
-                self.msg_samples.clear();
-            }
         }
+        // Keep the last known rate indefinitely
     }
 
     fn update_seen_times(&mut self, data: &ApiResponse, now_time: SystemTime) {
