@@ -44,6 +44,7 @@ pub enum InputMode {
     Columns,
     Help,
     Config,
+    Legend,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -272,6 +273,7 @@ pub struct App {
     pub(crate) route_batch: usize,
     pub(crate) altitude_trend_arrows: bool,
     pub(crate) track_arrows: bool,
+    pub(crate) stats_metrics: [String; 3],
     #[allow(dead_code)]
     pub(crate) flags_enabled: bool,
     pub(crate) route_last_poll: Option<SystemTime>,
@@ -335,6 +337,9 @@ impl App {
         altitude_trend_arrows: bool,
         track_arrows: bool,
         flags_enabled: bool,
+        stats_metric_1: String,
+        stats_metric_2: String,
+        stats_metric_3: String,
     ) -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -401,6 +406,7 @@ impl App {
             route_batch: route_batch.max(1),
             altitude_trend_arrows,
             track_arrows,
+            stats_metrics: [stats_metric_1, stats_metric_2, stats_metric_3],
             flags_enabled,
             route_last_poll: None,
             route_cache: HashMap::new(),
@@ -518,6 +524,15 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
+    pub fn open_legend(&mut self) {
+        self.config_cursor = 0;
+        self.input_mode = InputMode::Legend;
+    }
+
+    pub fn close_legend(&mut self) {
+        self.input_mode = InputMode::Help;
+    }
+
     pub fn open_config(&mut self) {
         self.config_items = load_config_items(&self.config_path);
         self.config_cursor = 0;
@@ -626,6 +641,26 @@ impl App {
             self.column_cursor = self.columns.len() - 1;
         } else {
             self.column_cursor -= 1;
+        }
+    }
+
+    pub fn next_cursor(&mut self, len: usize) {
+        if len == 0 {
+            self.config_cursor = 0;
+            return;
+        }
+        self.config_cursor = (self.config_cursor + 1) % len;
+    }
+
+    pub fn previous_cursor(&mut self, len: usize) {
+        if len == 0 {
+            self.config_cursor = 0;
+            return;
+        }
+        if self.config_cursor == 0 {
+            self.config_cursor = len - 1;
+        } else {
+            self.config_cursor -= 1;
         }
     }
 
@@ -1738,6 +1773,21 @@ fn default_config_items() -> Vec<ConfigItem> {
         "track_arrows",
         ConfigKind::Bool,
         config::DEFAULT_TRACK_ARROWS.to_string(),
+    );
+    push_item(
+        "stats_metric_1",
+        ConfigKind::Str,
+        config::DEFAULT_STATS_METRIC_1.to_string(),
+    );
+    push_item(
+        "stats_metric_2",
+        ConfigKind::Str,
+        config::DEFAULT_STATS_METRIC_2.to_string(),
+    );
+    push_item(
+        "stats_metric_3",
+        ConfigKind::Str,
+        config::DEFAULT_STATS_METRIC_3.to_string(),
     );
     push_item(
         "column_cache",

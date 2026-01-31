@@ -30,6 +30,9 @@ pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_ALTITUDE_TREND_ARROWS: bool = true;
 pub const DEFAULT_COLUMN_CACHE: bool = true;
 pub const DEFAULT_TRACK_ARROWS: bool = true;
+pub const DEFAULT_STATS_METRIC_1: &str = "msg_rate_total";
+pub const DEFAULT_STATS_METRIC_2: &str = "kbps_total";
+pub const DEFAULT_STATS_METRIC_3: &str = "msg_rate_avg";
 pub const DEFAULT_FLAGS_ENABLED: bool = true;
 
 #[derive(Debug, Clone)]
@@ -70,6 +73,9 @@ pub struct Config {
     pub column_cache: bool,
     pub track_arrows: bool,
     pub flags_enabled: bool,
+    pub stats_metric_1: String,
+    pub stats_metric_2: String,
+    pub stats_metric_3: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -109,6 +115,9 @@ struct FileConfig {
     column_cache: Option<bool>,
     track_arrows: Option<bool>,
     flags_enabled: Option<bool>,
+    stats_metric_1: Option<String>,
+    stats_metric_2: Option<String>,
+    stats_metric_3: Option<String>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -167,6 +176,9 @@ pub fn parse_args() -> Result<Config> {
         column_cache: DEFAULT_COLUMN_CACHE,
         track_arrows: DEFAULT_TRACK_ARROWS,
         flags_enabled: DEFAULT_FLAGS_ENABLED,
+        stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
+        stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
+        stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
     };
 
     if config_path.exists() {
@@ -320,6 +332,15 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_TRACK_ARROWS") {
         config.track_arrows = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_STATS_METRIC_1") {
+        config.stats_metric_1 = value;
+    }
+    if let Ok(value) = env::var("ADSB_STATS_METRIC_2") {
+        config.stats_metric_2 = value;
+    }
+    if let Ok(value) = env::var("ADSB_STATS_METRIC_3") {
+        config.stats_metric_3 = value;
     }
 
     let mut iter = args.iter();
@@ -534,6 +555,24 @@ pub fn parse_args() -> Result<Config> {
             "--no-track-arrows" => {
                 config.track_arrows = false;
             }
+            "--stats-metric-1" => {
+                config.stats_metric_1 = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--stats-metric-1 needs a value"))?
+                    .to_string();
+            }
+            "--stats-metric-2" => {
+                config.stats_metric_2 = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--stats-metric-2 needs a value"))?
+                    .to_string();
+            }
+            "--stats-metric-3" => {
+                config.stats_metric_3 = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--stats-metric-3 needs a value"))?
+                    .to_string();
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -661,6 +700,15 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(flags_enabled) = file.flags_enabled {
         target.flags_enabled = flags_enabled;
     }
+    if let Some(stats_metric_1) = file.stats_metric_1 {
+        target.stats_metric_1 = stats_metric_1;
+    }
+    if let Some(stats_metric_2) = file.stats_metric_2 {
+        target.stats_metric_2 = stats_metric_2;
+    }
+    if let Some(stats_metric_3) = file.stats_metric_3 {
+        target.stats_metric_3 = stats_metric_3;
+    }
 }
 
 fn print_help() {
@@ -681,6 +729,7 @@ fn print_help() {
     println!("       [--column-cache] [--no-column-cache]");
     println!("       [--track-arrows] [--no-track-arrows]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
+    println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
     println!("Environment: ADSB_URL overrides the default URL");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
     println!("Environment: ADSB_CONFIG overrides config path");
@@ -694,6 +743,7 @@ fn print_help() {
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
     println!("Environment: ADSB_TRACK_ARROWS toggles track direction arrows");
+    println!("Environment: ADSB_STATS_METRIC_1/2/3 control stats metrics");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | e export csv | E export json");
     println!("      C config editor");
