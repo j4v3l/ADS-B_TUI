@@ -270,6 +270,7 @@ pub struct App {
     pub(crate) route_refresh: Duration,
     pub(crate) route_batch: usize,
     pub(crate) altitude_trend_arrows: bool,
+    pub(crate) track_arrows: bool,
     pub(crate) route_last_poll: Option<SystemTime>,
     pub(crate) route_cache: HashMap<String, RouteInfo>,
     pub(crate) route_last_request: HashMap<String, SystemTime>,
@@ -329,6 +330,7 @@ impl App {
         overpass_mi: f64,
         notify_cooldown: Duration,
         altitude_trend_arrows: bool,
+        track_arrows: bool,
     ) -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -388,6 +390,7 @@ impl App {
             route_refresh,
             route_batch: route_batch.max(1),
             altitude_trend_arrows,
+            track_arrows,
             route_last_poll: None,
             route_cache: HashMap::new(),
             route_last_request: HashMap::new(),
@@ -1689,6 +1692,11 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         "altitude_trend_arrows",
         ConfigKind::Bool,
         config::DEFAULT_ALTITUDE_TREND_ARROWS.to_string(),
+    );
+    push_item(
+        "track_arrows",
+        ConfigKind::Bool,
+        config::DEFAULT_TRACK_ARROWS.to_string(),
     );
     push_item(
         "column_cache",

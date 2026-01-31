@@ -574,6 +574,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 &theme,
                 app.site(),
                 app.altitude_trend_arrows,
+                app.track_arrows,
             )
         });
 
@@ -619,7 +620,7 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let alt_baro = fmt_i64(ac.alt_baro, 0);
         let alt_geom = fmt_i64(ac.alt_geom, 0);
         let gs = fmt_f64(ac.gs, 0, 0);
-        let track = fmt_f64(ac.track, 0, 0);
+        let track = format_track_display(ac.track, app.track_arrows);
         let vs = fmt_i64(ac.baro_rate, 0);
         let qnh = fmt_f64(ac.nav_qnh, 0, 1);
         let mcp = fmt_i64(ac.nav_altitude_mcp, 0);
@@ -713,7 +714,7 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             ]),
             Line::from(vec![
                 Span::styled("GS/TRK   ", Style::default().fg(theme.dim)),
-                Span::raw(format!("{gs} kt / {track} deg")),
+                Span::raw(format!("{gs} kt / {track}")),
             ]),
             Line::from(vec![
                 Span::styled("POS      ", Style::default().fg(theme.dim)),
@@ -1110,6 +1111,41 @@ fn fmt_bearing(site: Option<SiteLocation>, ac: &crate::model::Aircraft, width: u
     }
 }
 
+fn format_track_cell(track: Option<f64>, arrows: bool) -> String {
+    format_track(track, false, arrows)
+}
+
+fn format_track_display(track: Option<f64>, arrows: bool) -> String {
+    format_track(track, true, arrows)
+}
+
+fn format_track(track: Option<f64>, with_degree: bool, arrows: bool) -> String {
+    let Some(track) = track else {
+        return "--".to_string();
+    };
+    let deg = track.rem_euclid(360.0);
+    let arrow = if arrows { track_arrow(deg) } else { "" };
+    if with_degree {
+        format!("{deg:03.0}°{arrow}")
+    } else {
+        format!("{deg:03.0}{arrow}")
+    }
+}
+
+fn track_arrow(deg: f64) -> &'static str {
+    let idx = ((deg + 22.5) / 45.0).floor() as i32 % 8;
+    match idx {
+        0 => "↑",
+        1 => "↗",
+        2 => "→",
+        3 => "↘",
+        4 => "↓",
+        5 => "↙",
+        6 => "←",
+        _ => "↖",
+    }
+}
+
 fn route_display(route: &crate::app::RouteInfo) -> String {
     match (&route.origin, &route.destination) {
         (Some(o), Some(d)) => format!("{o}-{d}"),
@@ -1263,7 +1299,7 @@ fn compute_column_widths(
                     fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0)
                 }
                 ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
-                ColumnId::Trk => fmt_f64(ac.track, 0, 0),
+                ColumnId::Trk => format_track_cell(ac.track, app.track_arrows),
                 ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
                 ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
                 ColumnId::Dist => fmt_distance(app.site(), ac, 0),
@@ -1352,6 +1388,7 @@ fn cell_for_column(
     theme: &Theme,
     site: Option<SiteLocation>,
     altitude_trend_arrows: bool,
+    track_arrows: bool,
 ) -> Cell<'static> {
     let mut text = match id {
         ColumnId::Fav => {
@@ -1367,7 +1404,7 @@ fn cell_for_column(
         ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
         ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, altitude_trend_arrows, 0),
         ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
-        ColumnId::Trk => fmt_f64(ac.track, 0, 0),
+        ColumnId::Trk => format_track_cell(ac.track, track_arrows),
         ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
         ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
         ColumnId::Dist => fmt_distance(site, ac, 0),

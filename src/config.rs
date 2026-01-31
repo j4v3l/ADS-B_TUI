@@ -29,6 +29,7 @@ pub const DEFAULT_OVERPASS_MI: f64 = 0.5;
 pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_ALTITUDE_TREND_ARROWS: bool = true;
 pub const DEFAULT_COLUMN_CACHE: bool = true;
+pub const DEFAULT_TRACK_ARROWS: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -66,6 +67,7 @@ pub struct Config {
     pub notify_cooldown_secs: u64,
     pub altitude_trend_arrows: bool,
     pub column_cache: bool,
+    pub track_arrows: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -103,6 +105,7 @@ struct FileConfig {
     notify_cooldown_secs: Option<u64>,
     altitude_trend_arrows: Option<bool>,
     column_cache: Option<bool>,
+    track_arrows: Option<bool>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -159,6 +162,7 @@ pub fn parse_args() -> Result<Config> {
         notify_cooldown_secs: DEFAULT_NOTIFY_COOLDOWN_SECS,
         altitude_trend_arrows: DEFAULT_ALTITUDE_TREND_ARROWS,
         column_cache: DEFAULT_COLUMN_CACHE,
+        track_arrows: DEFAULT_TRACK_ARROWS,
     };
 
     if config_path.exists() {
@@ -309,6 +313,9 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_COLUMN_CACHE") {
         config.column_cache = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_TRACK_ARROWS") {
+        config.track_arrows = matches!(value.as_str(), "1" | "true" | "yes" | "on");
     }
 
     let mut iter = args.iter();
@@ -517,6 +524,12 @@ pub fn parse_args() -> Result<Config> {
             "--no-column-cache" => {
                 config.column_cache = false;
             }
+            "--track-arrows" => {
+                config.track_arrows = true;
+            }
+            "--no-track-arrows" => {
+                config.track_arrows = false;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -638,6 +651,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(column_cache) = file.column_cache {
         target.column_cache = column_cache;
     }
+    if let Some(track_arrows) = file.track_arrows {
+        target.track_arrows = track_arrows;
+    }
 }
 
 fn print_help() {
@@ -656,6 +672,7 @@ fn print_help() {
     println!("       [--rate-window-ms MS] [--rate-min-secs SECS]");
     println!("       [--notify-mi MILES] [--overpass-mi MILES] [--notify-cooldown SECS]");
     println!("       [--column-cache] [--no-column-cache]");
+    println!("       [--track-arrows] [--no-track-arrows]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("Environment: ADSB_URL overrides the default URL");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
@@ -669,6 +686,7 @@ fn print_help() {
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
+    println!("Environment: ADSB_TRACK_ARROWS toggles track direction arrows");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | e export csv | E export json");
     println!("      C config editor");
