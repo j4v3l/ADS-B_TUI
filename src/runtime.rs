@@ -48,12 +48,15 @@ pub fn run_app(
     routes: Option<RouteChannels>,
 ) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
+    let mut last_draw: Option<SystemTime> = None;
     loop {
+        let mut dirty = false;
         while let Ok(message) = rx.try_recv() {
             match message {
                 Ok(data) => app.apply_update(data),
                 Err(err) => app.apply_error(err),
             }
+            dirty = true;
         }
 
         if let Some(routes) = &routes {
@@ -62,36 +65,22 @@ pub fn run_app(
                     RouteMessage::Results(results) => app.apply_routes(results),
                     RouteMessage::Error(err) => app.set_route_error(err),
                 }
+                dirty = true;
             }
         }
 
         let now = SystemTime::now();
         app.maybe_swap_snapshot(now);
 
-        let indices = app.visible_indices();
-        app.restore_selection_by_key(&indices);
-        app.clamp_selection_to(indices.len());
-        app.update_selection_key(&indices);
+        let draw_due = is_draw_due(now, last_draw, app.ui_interval);
+        let poll_timeout = if dirty || draw_due {
+            Duration::from_millis(0)
+        } else {
+            tick_rate
+        };
 
-        terminal.draw(|f| ui::ui(f, &mut app, &indices))?;
-        app.advance_tick();
-
-        if let Some(routes) = &routes {
-            let now = SystemTime::now();
-            if app.route_enabled() && app.route_refresh_due(now) {
-                if app.route_tar1090() {
-                    let _ = routes.req_tx.send(Vec::new());
-                } else {
-                    let requests = app.collect_route_requests(&indices, now);
-                    if !requests.is_empty() {
-                        let _ = routes.req_tx.send(requests);
-                    }
-                }
-                app.mark_route_poll(now);
-            }
-        }
-
-        if event::poll(tick_rate)? {
+        let mut indices = app.visible_indices();
+        if event::poll(poll_timeout)? {
             match event::read()? {
                 Event::Key(key) => match app.input_mode {
                     InputMode::Normal => match key.code {
@@ -216,7 +205,51 @@ pub fn run_app(
                 }
                 _ => {}
             }
+            dirty = true;
         }
+
+        if dirty {
+            indices = app.visible_indices();
+        }
+        app.restore_selection_by_key(&indices);
+        app.clamp_selection_to(indices.len());
+        app.update_selection_key(&indices);
+
+        if let Some(routes) = &routes {
+            let now = SystemTime::now();
+            if app.route_enabled() && app.route_refresh_due(now) {
+                if app.route_tar1090() {
+                    let _ = routes.req_tx.send(Vec::new());
+                } else {
+                    let requests = app.collect_route_requests(&indices, now);
+                    if !requests.is_empty() {
+                        let _ = routes.req_tx.send(requests);
+                    }
+                }
+                app.mark_route_poll(now);
+            }
+        }
+
+        let now = SystemTime::now();
+        let draw_due = is_draw_due(now, last_draw, app.ui_interval);
+        if dirty || draw_due {
+            terminal.draw(|f| ui::ui(f, &mut app, &indices))?;
+            app.advance_tick();
+            last_draw = Some(now);
+        }
+    }
+}
+
+fn is_draw_due(now: SystemTime, last_draw: Option<SystemTime>, interval: Duration) -> bool {
+    if interval.is_zero() {
+        return true;
+    }
+    match last_draw {
+        Some(last) => now
+            .duration_since(last)
+            .map(|d| d >= interval)
+            .unwrap_or(true),
+        None => true,
     }
 }
 

@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app::{App, ColumnId, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
 use crate::model::seen_seconds;
@@ -120,18 +120,22 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Color::Green
     };
 
-    let spinner = ["|", "/", "-", "\\"][app.tick as usize % 4];
-    let blink = app
+    let spinner = ["|", "/", "-", "\\"][phase_index(200, 4)];
+    let since_update_ms = app
         .last_update
         .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .map(|d| d.as_millis() < 900)
-        .unwrap_or(false);
-    let sync_style = if blink {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.dim)
+        .map(|d| d.as_millis() as u64);
+    let sync_style = match since_update_ms {
+        Some(ms) if ms < 1200 => {
+            if phase_ms(500) {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.accent)
+            }
+        }
+        _ => Style::default().fg(theme.dim),
     };
 
     let total_text = match (total_rate, total_kbps) {
@@ -280,7 +284,12 @@ fn render_alerts(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     spans.extend(alert_span("LOWNIC", low_nic, theme.warn));
     spans.extend(alert_span("LOWNAC", low_nac, theme.warn));
     spans.extend(alert_span("FAV", favs, theme.fav));
-    spans.extend(alert_span("NEAR", near, theme.accent));
+    let near_color = if phase_ms(800) {
+        theme.accent
+    } else {
+        theme.warn
+    };
+    spans.extend(alert_span("NEAR", near, near_color));
     spans.extend(alert_span("RERR", route_err, theme.danger));
 
     let filter_style = if app.input_mode == InputMode::Filter {
@@ -538,6 +547,17 @@ fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let cx = width / 2;
         let cy = height / 2;
         set_grid(&mut grid, cx, cy, '+', 1);
+        let sweep_period_ms = 4500u64;
+        let sweep_pos = (now_ms() % sweep_period_ms) as f64 / sweep_period_ms as f64;
+        let sweep_rad = sweep_pos * std::f64::consts::TAU;
+        let max_r = ((width.min(height)) as f64 / 2.0).max(1.0) as usize;
+        for r in 0..=max_r {
+            let x = (cx as f64 + r as f64 * sweep_rad.cos()).round() as isize;
+            let y = (cy as f64 - r as f64 * sweep_rad.sin()).round() as isize;
+            let xi = x.clamp(0, width.saturating_sub(1) as isize) as usize;
+            let yi = y.clamp(0, height.saturating_sub(1) as isize) as usize;
+            set_grid(&mut grid, xi, yi, ':', 0);
+        }
 
         for (lat, lon, fav, current) in points {
             let dx = (lon - center_lon) / max_delta;
@@ -611,6 +631,9 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .style(Style::default().bg(theme.header_bg))
         .height(1);
 
+    let fresh_pulse = phase_ms(650);
+    let stale_pulse = phase_ms(900);
+
     let rows = indices.iter().enumerate().map(|(i, idx)| {
         let ac = &app.data.aircraft[*idx];
         let seen = seen_seconds(ac);
@@ -632,8 +655,17 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
 
         if overpass {
             style = style.fg(Color::Green).add_modifier(Modifier::BOLD);
+        } else if seen.map(|s| s <= 1.0).unwrap_or(false) {
+            style = if fresh_pulse {
+                style
+                    .fg(theme.accent)
+                    .bg(theme.header_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                style.fg(theme.accent)
+            };
         } else if stale {
-            style = if app.tick % 2 == 0 {
+            style = if stale_pulse {
                 style.fg(theme.danger)
             } else {
                 style.fg(theme.dim)
@@ -641,6 +673,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         }
 
         let route = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route);
         let cells = columns.iter().zip(widths.iter()).map(|(col, width)| {
             cell_for_column(
                 col.id,
@@ -650,6 +683,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 seen,
                 trend,
                 route,
+                route_pending,
                 &theme,
                 app.site(),
                 app.altitude_trend_arrows,
@@ -716,10 +750,13 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let sil = fmt_i64(ac.sil, 0);
         let rssi = fmt_f64(ac.rssi, 0, 1);
         let favorite = if app.is_favorite(ac) { "YES" } else { "NO" };
-        let route = app
-            .route_for(ac)
-            .map(route_display)
-            .unwrap_or("--".to_string());
+        let route_info = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route_info);
+        let route = if route_pending {
+            route_pending_text().to_string()
+        } else {
+            route_info.map(route_display).unwrap_or("--".to_string())
+        };
         let trail = app.trail_for(ac).unwrap_or(&[]);
         let trail_preview = trail
             .iter()
@@ -856,10 +893,12 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let width = area.width.saturating_sub(40) as usize;
+    let sweep_period_ms = 3500u64;
     let sweep_pos = if width == 0 {
         0
     } else {
-        (app.tick as usize) % width
+        let ms = now_ms() % sweep_period_ms;
+        ((ms as usize) * width) / sweep_period_ms as usize
     };
     let mut sweep = String::with_capacity(width);
     for i in 0..width {
@@ -1487,6 +1526,46 @@ fn columns_min_width(columns: &[crate::app::ColumnConfig]) -> u16 {
     sum.saturating_add(spacing)
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn phase_ms(period_ms: u64) -> bool {
+    if period_ms == 0 {
+        return true;
+    }
+    (now_ms() / period_ms) % 2 == 0
+}
+
+fn phase_index(period_ms: u64, frames: usize) -> usize {
+    if frames == 0 || period_ms == 0 {
+        return 0;
+    }
+    ((now_ms() / period_ms) as usize) % frames
+}
+
+fn route_pending_for(
+    app: &App,
+    ac: &crate::model::Aircraft,
+    route: Option<&crate::app::RouteInfo>,
+) -> bool {
+    app.route_enabled()
+        && route.is_none()
+        && ac
+            .flight
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+}
+
+fn route_pending_text() -> &'static str {
+    const FRAMES: [&str; 4] = [".", "..", "...", ".."];
+    FRAMES[phase_index(350, FRAMES.len())]
+}
+
 fn compute_column_widths(
     app: &App,
     columns: &[crate::app::ColumnConfig],
@@ -1514,6 +1593,7 @@ fn compute_column_widths(
         let ac = &app.data.aircraft[*idx];
         let trend = app.trend_for(ac);
         let route = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route);
         for (i, col) in columns.iter().enumerate() {
             let value = match col.id {
                 ColumnId::Fav => {
@@ -1526,7 +1606,13 @@ fn compute_column_widths(
                 ColumnId::Flight => fmt_text(ac.flight.as_deref()),
                 ColumnId::Reg => fmt_text(ac.r.as_deref()),
                 ColumnId::Type => fmt_text(ac.t.as_deref()),
-                ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
+                ColumnId::Route => {
+                    if route_pending {
+                        "...".to_string()
+                    } else {
+                        route.map(route_display).unwrap_or_else(|| "--".to_string())
+                    }
+                }
                 ColumnId::Alt => {
                     fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0)
                 }
@@ -1618,6 +1704,7 @@ fn cell_for_column(
     seen: Option<f64>,
     trend: crate::app::Trend,
     route: Option<&crate::app::RouteInfo>,
+    route_pending: bool,
     theme: &Theme,
     site: Option<SiteLocation>,
     altitude_trend_arrows: bool,
@@ -1634,7 +1721,13 @@ fn cell_for_column(
         ColumnId::Flight => fmt_text(ac.flight.as_deref()),
         ColumnId::Reg => fmt_text(ac.r.as_deref()),
         ColumnId::Type => fmt_text(ac.t.as_deref()),
-        ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
+        ColumnId::Route => {
+            if route_pending {
+                route_pending_text().to_string()
+            } else {
+                route.map(route_display).unwrap_or_else(|| "--".to_string())
+            }
+        }
         ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, altitude_trend_arrows, 0),
         ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
         ColumnId::Trk => format_track_cell(ac.track, track_arrows),
