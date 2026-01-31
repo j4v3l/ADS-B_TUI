@@ -88,12 +88,10 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let count = app.data.aircraft.len();
     let msg_total = app.data.messages.unwrap_or(0);
-    let msg_rate_total = app.msg_rate_display();
-    let avg_rate = match (msg_rate_total, count) {
-        (Some(rate), n) if n > 0 => Some(rate / n as f64),
-        _ => None,
-    };
-    let kbps = avg_rate.map(|rate| rate * 112.0 / 1000.0);
+    let total_rate = app.msg_rate_display();
+    let avg_rate = app.avg_aircraft_rate();
+    let total_kbps = total_rate.map(|rate| rate * 112.0 / 1000.0);
+    let avg_kbps = avg_rate.map(|rate| rate * 112.0 / 1000.0);
 
     let api_time = app
         .data
@@ -132,7 +130,12 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(theme.dim)
     };
 
-    let rate_text = match (avg_rate, kbps) {
+    let total_text = match (total_rate, total_kbps) {
+        (Some(rate), Some(kbps)) => format!("{rate:.1}/s {kbps:.1}kbps"),
+        (Some(rate), None) => format!("{rate:.1}/s"),
+        _ => "--".to_string(),
+    };
+    let avg_text = match (avg_rate, avg_kbps) {
         (Some(rate), Some(kbps)) => format!("{rate:.1}/s {kbps:.1}kbps"),
         (Some(rate), None) => format!("{rate:.1}/s"),
         _ => "--".to_string(),
@@ -153,10 +156,9 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
-        Span::styled(
-            format!("AVG {rate_text}"),
-            Style::default().fg(theme.accent),
-        ),
+        Span::styled(format!("TOT {total_text}"), Style::default().fg(theme.accent)),
+        Span::raw(" | "),
+        Span::styled(format!("AVG {avg_text}"), Style::default().fg(theme.dim)),
     ]);
 
     let line_bottom = Line::from(vec![
@@ -790,14 +792,6 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
-    if let Some((name, when)) = &app.last_export {
-        if let Ok(delta) = SystemTime::now().duration_since(*when) {
-            if delta <= Duration::from_secs(5) {
-                help.push_str(&format!("  saved {name}"));
-            }
-        }
-    }
-
     let mut spans = vec![Span::styled(help, Style::default().fg(theme.dim))];
     if let Some(note) = app.latest_notification() {
         if let Ok(delta) = SystemTime::now().duration_since(note.at) {
@@ -806,6 +800,17 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 spans.push(Span::styled(
                     format!("ALERT {}", note.message),
                     Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
+    }
+    if let Some((name, when)) = &app.last_export {
+        if let Ok(delta) = SystemTime::now().duration_since(*when) {
+            if delta <= Duration::from_secs(6) {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("SAVED {}", name),
+                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
                 ));
             }
         }
