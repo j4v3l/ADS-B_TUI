@@ -554,7 +554,9 @@ impl App {
 
     pub fn save_config(&mut self) {
         let existing = fs::read_to_string(&self.config_path).unwrap_or_default();
-        let mut doc = existing.parse::<DocumentMut>().unwrap_or_else(|_| DocumentMut::new());
+        let mut doc = existing
+            .parse::<DocumentMut>()
+            .unwrap_or_else(|_| DocumentMut::new());
 
         for item in &self.config_items {
             match parse_config_value(item.kind, item.value.trim()) {
@@ -604,11 +606,7 @@ impl App {
         if self.columns.is_empty() {
             return;
         }
-        let visible_count = self
-            .columns
-            .iter()
-            .filter(|col| col.visible)
-            .count();
+        let visible_count = self.columns.iter().filter(|col| col.visible).count();
         if let Some(col) = self.columns.get_mut(self.column_cursor) {
             if col.visible && visible_count <= 1 {
                 return;
@@ -759,7 +757,6 @@ impl App {
                     }
                     if let Some(flight) = ac.flight.as_deref() {
                         self.selection_key = Some(normalize_callsign(flight));
-                        return;
                     }
                 }
             }
@@ -790,9 +787,7 @@ impl App {
                 SortMode::LastSeen => {
                     let a_seen = seen_seconds(a_ac);
                     let b_seen = seen_seconds(b_ac);
-                    a_seen
-                        .partial_cmp(&b_seen)
-                        .unwrap_or(Ordering::Equal)
+                    a_seen.partial_cmp(&b_seen).unwrap_or(Ordering::Equal)
                 }
                 SortMode::Altitude => {
                     let a_alt = a_ac.alt_baro.unwrap_or(-1);
@@ -802,9 +797,7 @@ impl App {
                 SortMode::Speed => {
                     let a_spd = a_ac.gs.unwrap_or(-1.0);
                     let b_spd = b_ac.gs.unwrap_or(-1.0);
-                    b_spd
-                        .partial_cmp(&a_spd)
-                        .unwrap_or(Ordering::Equal)
+                    b_spd.partial_cmp(&a_spd).unwrap_or(Ordering::Equal)
                 }
             }
         });
@@ -875,7 +868,10 @@ impl App {
             return true;
         }
         match self.route_last_poll {
-            Some(last) => now.duration_since(last).map(|d| d >= self.route_refresh).unwrap_or(false),
+            Some(last) => now
+                .duration_since(last)
+                .map(|d| d >= self.route_refresh)
+                .unwrap_or(false),
             None => true,
         }
     }
@@ -1118,8 +1114,7 @@ impl App {
     fn update_seen_times(&mut self, data: &ApiResponse, now_time: SystemTime) {
         for ac in &data.aircraft {
             if let Some(hex) = ac.hex.as_deref() {
-                self.seen_times
-                    .insert(normalize_hex(hex), now_time);
+                self.seen_times.insert(normalize_hex(hex), now_time);
             }
         }
     }
@@ -1178,11 +1173,7 @@ impl App {
             return;
         }
 
-        let max_age_secs = self
-            .notify_cooldown
-            .as_secs()
-            .saturating_mul(4)
-            .max(60);
+        let max_age_secs = self.notify_cooldown.as_secs().saturating_mul(4).max(60);
         let max_age = Duration::from_secs(max_age_secs);
         self.notified_recent.retain(|_, last| {
             now.duration_since(*last)
@@ -1297,8 +1288,7 @@ fn distance_mi(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1 = lat1.to_radians();
     let lat2 = lat2.to_radians();
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r_mi * c
 }
@@ -1323,14 +1313,16 @@ fn merge_api_response(target: &mut ApiResponse, prev: &ApiResponse) {
     for ac in &mut target.aircraft {
         let key = if let Some(hex) = ac.hex.as_deref() {
             Some(format!("hex:{}", normalize_hex(hex)))
-        } else if let Some(flight) = ac.flight.as_deref() {
-            Some(format!("flt:{}", normalize_callsign(flight)))
         } else {
-            None
+            ac.flight
+                .as_deref()
+                .map(|flight| format!("flt:{}", normalize_callsign(flight)))
         };
 
         let Some(key) = key else { continue };
-        let Some(prev_ac) = prev_map.get(&key) else { continue };
+        let Some(prev_ac) = prev_map.get(&key) else {
+            continue;
+        };
 
         fill_string(&mut ac.hex, &prev_ac.hex);
         fill_string(&mut ac.kind, &prev_ac.kind);
@@ -1512,14 +1504,26 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         ConfigKind::Int,
         config::DEFAULT_STALE_SECS.to_string(),
     );
-    push_item("low_nic", ConfigKind::Int, config::DEFAULT_LOW_NIC.to_string());
-    push_item("low_nac", ConfigKind::Int, config::DEFAULT_LOW_NAC.to_string());
+    push_item(
+        "low_nic",
+        ConfigKind::Int,
+        config::DEFAULT_LOW_NIC.to_string(),
+    );
+    push_item(
+        "low_nac",
+        ConfigKind::Int,
+        config::DEFAULT_LOW_NAC.to_string(),
+    );
     push_item(
         "trail_len",
         ConfigKind::Int,
         config::DEFAULT_TRAIL_LEN.to_string(),
     );
-    push_item("favorites_file", ConfigKind::Str, config::DEFAULT_FAVORITES_FILE.to_string());
+    push_item(
+        "favorites_file",
+        ConfigKind::Str,
+        config::DEFAULT_FAVORITES_FILE.to_string(),
+    );
     push_item("filter", ConfigKind::Str, "".to_string());
     push_item("layout", ConfigKind::Str, "full".to_string());
     push_item("theme", ConfigKind::Str, "default".to_string());

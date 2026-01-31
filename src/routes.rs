@@ -213,23 +213,32 @@ fn parse_route_object(value: &Value, key_callsign: Option<&String>) -> Option<Ro
         .or_else(|| key_callsign.cloned())
         .map(|v| v.trim().to_string())?;
 
-    let route_text = extract_string(obj, &["route", "flightroute", "_airport_codes_iata", "airport_codes"]);
+    let route_text = extract_string(
+        obj,
+        &[
+            "route",
+            "flightroute",
+            "_airport_codes_iata",
+            "airport_codes",
+        ],
+    );
     let origin = extract_string(obj, &["origin", "orig", "from", "departure", "dep"]);
     let destination = extract_string(obj, &["destination", "dest", "to", "arrival", "arr"]);
     let alt_origin = extract_string(obj, &["airport1", "from_iata", "from_icao"]);
     let alt_dest = extract_string(obj, &["airport2", "to_iata", "to_icao"]);
 
-    let (origin, destination, route_text) = match (origin.or(alt_origin), destination.or(alt_dest), route_text) {
-        (Some(o), Some(d), r) => (Some(o), Some(d), r),
-        (None, None, Some(r)) => {
-            if let Some((o, d)) = split_route(&r) {
-                (Some(o), Some(d), Some(r))
-            } else {
-                (None, None, Some(r))
+    let (origin, destination, route_text) =
+        match (origin.or(alt_origin), destination.or(alt_dest), route_text) {
+            (Some(o), Some(d), r) => (Some(o), Some(d), r),
+            (None, None, Some(r)) => {
+                if let Some((o, d)) = split_route(&r) {
+                    (Some(o), Some(d), Some(r))
+                } else {
+                    (None, None, Some(r))
+                }
             }
-        }
-        other => other,
-    };
+            other => other,
+        };
 
     Some(RouteResult {
         callsign: callsign.trim().to_string(),
