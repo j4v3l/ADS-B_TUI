@@ -134,7 +134,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         _ => "--".to_string(),
     };
 
-    let line = Line::from(vec![
+    let line_top = Line::from(vec![
         Span::styled(
             "ADSB BOARD",
             Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
@@ -145,7 +145,9 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
         Span::styled(format!("AVG {rate_text}"), Style::default().fg(theme.accent)),
-        Span::raw(" | "),
+    ]);
+
+    let line_bottom = Line::from(vec![
         Span::raw(format!("API {api_time}")),
         Span::raw(" | "),
         Span::raw(format!("SORT {}", app.sort.label())),
@@ -159,13 +161,19 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("SYNC {spinner}"), sync_style),
         Span::raw(" | "),
         Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::raw(" | "),
+        Span::styled("MENU ", Style::default().fg(theme.dim)),
+        Span::styled("[s]Sort ", Style::default().fg(theme.dim)),
+        Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
+        Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
+        Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title("FEED");
-    let paragraph = Paragraph::new(line)
+    let paragraph = Paragraph::new(vec![line_top, line_bottom])
         .block(block)
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, area);
