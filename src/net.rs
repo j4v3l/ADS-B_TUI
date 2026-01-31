@@ -35,10 +35,7 @@ pub fn spawn_fetcher(
     });
 }
 
-fn fetch_once(
-    client: &reqwest::blocking::Client,
-    url: &str,
-) -> Result<ApiResponse, String> {
+fn fetch_once(client: &reqwest::blocking::Client, url: &str) -> Result<ApiResponse, String> {
     let resp = client.get(url).send().map_err(|err| err.to_string())?;
     let status = resp.status();
     if !status.is_success() {

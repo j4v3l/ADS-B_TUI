@@ -15,9 +15,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::app::{App, InputMode};
 use crate::export;
+use crate::model::ApiResponse;
 use crate::routes::{RouteMessage, RouteRequest};
 use crate::storage;
-use crate::model::ApiResponse;
 use crate::ui;
 
 pub fn init_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {

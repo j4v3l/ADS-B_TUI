@@ -3,10 +3,10 @@ mod config;
 mod export;
 mod model;
 mod net;
+mod routes;
 mod runtime;
 mod storage;
 mod ui;
-mod routes;
 
 use anyhow::Result;
 use std::collections::HashSet;
@@ -16,8 +16,8 @@ use std::time::Duration;
 use app::{App, LayoutMode, SiteLocation, ThemeMode};
 use config::parse_args;
 use net::spawn_fetcher;
-use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use routes::spawn_route_fetcher;
+use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use std::path::PathBuf;
 use storage::load_favorites;
 
@@ -97,7 +97,7 @@ fn main() -> Result<()> {
             favorites_path.clone(),
             site,
             config.route_enabled,
-            config.route_mode.to_ascii_lowercase() == "tar1090",
+            config.route_mode.eq_ignore_ascii_case("tar1090"),
             Duration::from_secs(config.route_ttl_secs),
             Duration::from_secs(config.route_refresh_secs),
             config.route_batch as usize,

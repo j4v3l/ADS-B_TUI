@@ -2,9 +2,7 @@ use chrono::{DateTime, Local, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap,
-};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 use std::time::{Duration, SystemTime};
 
@@ -127,7 +125,9 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .map(|d| d.as_millis() < 900)
         .unwrap_or(false);
     let sync_style = if blink {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.dim)
     };
@@ -141,14 +141,22 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let line_top = Line::from(vec![
         Span::styled(
             "ADSB BOARD",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
-        Span::styled(format!("AIRCRAFT {count}"), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("AIRCRAFT {count}"),
+            Style::default().fg(Color::Cyan),
+        ),
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
-        Span::styled(format!("AVG {rate_text}"), Style::default().fg(theme.accent)),
+        Span::styled(
+            format!("AVG {rate_text}"),
+            Style::default().fg(theme.accent),
+        ),
     ]);
 
     let line_bottom = Line::from(vec![
@@ -164,7 +172,12 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(" | "),
         Span::styled(format!("SYNC {spinner}"), sync_style),
         Span::raw(" | "),
-        Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" | "),
         Span::styled("MENU ", Style::default().fg(theme.dim)),
         Span::styled("[s]Sort ", Style::default().fg(theme.dim)),
@@ -263,7 +276,9 @@ fn render_alerts(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     spans.extend(alert_span("RERR", route_err, theme.danger));
 
     let filter_style = if app.input_mode == InputMode::Filter {
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.dim)
     };
@@ -343,7 +358,9 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             Span::styled("VISIBLE ", Style::default().fg(theme.dim)),
             Span::styled(
                 format!("{visible}/{total}"),
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
@@ -420,7 +437,10 @@ fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     } else {
         let (center_lat, center_lon) = match app.site() {
             Some(site) => (site.lat, site.lon),
-            None => (sum_lat / current_points as f64, sum_lon / current_points as f64),
+            None => (
+                sum_lat / current_points as f64,
+                sum_lon / current_points as f64,
+            ),
         };
         let mut max_delta = 0.0001f64;
         for (lat, lon, _, _) in &points {
@@ -486,9 +506,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
     let column_ids: Vec<ColumnId> = columns.iter().map(|col| col.id).collect();
     let widths = app
         .column_cache_lookup(available_width, &column_ids, indices.len(), now)
-        .unwrap_or_else(|| {
-            compute_column_widths(app, &columns, indices, available_width)
-        });
+        .unwrap_or_else(|| compute_column_widths(app, &columns, indices, available_width));
     if app.column_cache_enabled {
         app.column_cache_store(
             available_width,
@@ -614,7 +632,10 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let sil = fmt_i64(ac.sil, 0);
         let rssi = fmt_f64(ac.rssi, 0, 1);
         let favorite = if app.is_favorite(ac) { "YES" } else { "NO" };
-        let route = app.route_for(ac).map(route_display).unwrap_or("--".to_string());
+        let route = app
+            .route_for(ac)
+            .map(route_display)
+            .unwrap_or("--".to_string());
         let trail = app.trail_for(ac).unwrap_or(&[]);
         let trail_preview = trail
             .iter()
@@ -643,7 +664,9 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
                 Span::styled("CALLSIGN ", Style::default().fg(theme.dim)),
                 Span::styled(
                     flight,
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
@@ -749,7 +772,11 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let width = area.width.saturating_sub(40) as usize;
-    let sweep_pos = if width == 0 { 0 } else { (app.tick as usize) % width };
+    let sweep_pos = if width == 0 {
+        0
+    } else {
+        (app.tick as usize) % width
+    };
     let mut sweep = String::with_capacity(width);
     for i in 0..width {
         if i == sweep_pos {
@@ -759,9 +786,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = format!(
-        "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  C config  ? help",
-    );
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -844,7 +869,9 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
     let lines = vec![
         Line::from(Span::styled(
             "Keys",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from("q           Quit"),
@@ -896,7 +923,9 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
         format!("CONFIG {}", app.config_path.display()),
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -1001,7 +1030,11 @@ fn fmt_u64(value: Option<u64>, width: usize) -> String {
 fn fmt_f64(value: Option<f64>, width: usize, precision: usize) -> String {
     match value {
         Some(v) if width > 0 => {
-            format!("{v:>width$.precision$}", width = width, precision = precision)
+            format!(
+                "{v:>width$.precision$}",
+                width = width,
+                precision = precision
+            )
         }
         Some(v) => format!("{v:.precision$}", precision = precision),
         None if width > 0 => format!("{:>width$}", "--", width = width),
@@ -1085,8 +1118,7 @@ fn distance_nm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1 = lat1.to_radians();
     let lat2 = lat2.to_radians();
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r_nm * c
 }
@@ -1198,10 +1230,7 @@ fn compute_column_widths(
         return vec![1; columns.len()];
     }
 
-    let mut desired: Vec<usize> = columns
-        .iter()
-        .map(|col| col.width as usize)
-        .collect();
+    let mut desired: Vec<usize> = columns.iter().map(|col| col.width as usize).collect();
 
     for (i, col) in columns.iter().enumerate() {
         desired[i] = desired[i].max(col.label.len());
@@ -1225,7 +1254,9 @@ fn compute_column_widths(
                 ColumnId::Reg => fmt_text(ac.r.as_deref()),
                 ColumnId::Type => fmt_text(ac.t.as_deref()),
                 ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
-                ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0),
+                ColumnId::Alt => {
+                    fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0)
+                }
                 ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
                 ColumnId::Trk => fmt_f64(ac.track, 0, 0),
                 ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
@@ -1304,6 +1335,7 @@ fn bearing_deg(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     brg
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cell_for_column(
     id: ColumnId,
     width: usize,
@@ -1373,7 +1405,7 @@ fn format_duration(duration: Duration) -> String {
     format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 
-fn set_grid(grid: &mut Vec<Vec<(char, u8)>>, x: usize, y: usize, ch: char, prio: u8) {
+fn set_grid(grid: &mut [Vec<(char, u8)>], x: usize, y: usize, ch: char, prio: u8) {
     if let Some(row) = grid.get_mut(y) {
         if let Some(cell) = row.get_mut(x) {
             if prio >= cell.1 {

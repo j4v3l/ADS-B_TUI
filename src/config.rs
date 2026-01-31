@@ -645,7 +645,9 @@ fn print_help() {
     println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
     println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
     println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
-    println!("       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]");
+    println!(
+        "       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]"
+    );
     println!("       [--site-lat LAT] [--site-lon LON] [--site-alt-m METERS]");
     println!("       [--route-base URL] [--route-ttl SECS] [--route-refresh SECS]");
     println!("       [--route-batch N] [--route-timeout SECS] [--route-disable]");
