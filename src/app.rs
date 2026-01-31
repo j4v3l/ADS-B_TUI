@@ -821,11 +821,20 @@ impl App {
     }
 
     fn update_rate(&mut self, data: &ApiResponse, now_time: SystemTime) {
+        let hold = {
+            let mut value = self.msg_rate_window + self.msg_rate_window;
+            if value < Duration::from_secs(2) {
+                value = Duration::from_secs(2);
+            }
+            value
+        };
+
         if let Some(messages) = data.messages {
             if let Some(last_total) = self.last_msg_total {
                 if messages < last_total {
                     self.msg_samples.clear();
                     self.msg_rate_ema = None;
+                    self.msg_rate_display = None;
                 }
             }
 
@@ -845,23 +854,74 @@ impl App {
                 }
             }
 
-            if let (Some((t0, m0)), Some((t1, m1))) =
+            let window_rate = if let (Some((t0, m0)), Some((t1, m1))) =
                 (self.msg_samples.front(), self.msg_samples.back())
             {
                 if let Ok(delta_t) = t1.duration_since(*t0) {
                     let secs = delta_t.as_secs_f64().max(self.msg_rate_min_secs);
                     let delta_msgs = m1.saturating_sub(*m0) as f64;
-                    let inst = delta_msgs / secs;
-                    let ema = match self.msg_rate_ema {
-                        Some(prev) => 0.4 * inst + 0.6 * prev,
-                        None => inst,
-                    };
-                    self.msg_rate_ema = Some(ema);
-                    self.msg_rate = Some(ema);
-                    self.msg_rate_display = Some(ema);
-                    self.msg_rate_last_display = Some(now_time);
+                    Some((delta_msgs, secs))
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
+
+            let short_rate = if self.msg_samples.len() >= 2 {
+                let last = self.msg_samples.len() - 1;
+                if let (Some((t0, m0)), Some((t1, m1))) =
+                    (self.msg_samples.get(last - 1), self.msg_samples.get(last))
+                {
+                    if let Ok(delta_t) = t1.duration_since(*t0) {
+                        let secs = delta_t.as_secs_f64().max(self.msg_rate_min_secs * 0.5);
+                        let delta_msgs = m1.saturating_sub(*m0) as f64;
+                        Some((delta_msgs, secs))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let inst = match (short_rate, window_rate) {
+                (Some((dm_s, s_s)), Some((dm_w, s_w))) => {
+                    let rate_s = dm_s / s_s;
+                    let rate_w = dm_w / s_w;
+                    0.7 * rate_s + 0.3 * rate_w
+                }
+                (Some((dm_s, s_s)), None) => dm_s / s_s,
+                (None, Some((dm_w, s_w))) => dm_w / s_w,
+                _ => return,
+            };
+
+            if inst <= 0.0 {
+                if let Some(last) = self.msg_rate_last_display {
+                    if now_time
+                        .duration_since(last)
+                        .map(|d| d < hold)
+                        .unwrap_or(true)
+                    {
+                        return;
+                    }
+                }
+                self.msg_rate = None;
+                self.msg_rate_ema = None;
+                self.msg_rate_display = None;
+                return;
             }
+
+            let ema = match self.msg_rate_ema {
+                Some(prev) => 0.45 * inst + 0.55 * prev,
+                None => inst,
+            };
+            self.msg_rate_ema = Some(ema);
+            self.msg_rate = Some(ema);
+            self.msg_rate_display = Some(ema);
+            self.msg_rate_last_display = Some(now_time);
         }
         // Keep the last known rate indefinitely
     }

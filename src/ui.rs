@@ -86,6 +86,12 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let count = app.data.aircraft.len();
     let msg_total = app.data.messages.unwrap_or(0);
+    let msg_rate_total = app.msg_rate_display();
+    let avg_rate = match (msg_rate_total, count) {
+        (Some(rate), n) if n > 0 => Some(rate / n as f64),
+        _ => None,
+    };
+    let kbps = avg_rate.map(|rate| rate * 112.0 / 1000.0);
 
     let api_time = app
         .data
@@ -122,6 +128,12 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(theme.dim)
     };
 
+    let rate_text = match (avg_rate, kbps) {
+        (Some(rate), Some(kbps)) => format!("{rate:.1}/s {kbps:.1}kbps"),
+        (Some(rate), None) => format!("{rate:.1}/s"),
+        _ => "--".to_string(),
+    };
+
     let line = Line::from(vec![
         Span::styled(
             "ADSB BOARD",
@@ -131,6 +143,8 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("AIRCRAFT {count}"), Style::default().fg(Color::Cyan)),
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
+        Span::raw(" | "),
+        Span::styled(format!("AVG {rate_text}"), Style::default().fg(theme.accent)),
         Span::raw(" | "),
         Span::raw(format!("API {api_time}")),
         Span::raw(" | "),
