@@ -154,6 +154,14 @@ pub fn run_app(
                     InputMode::Help => match key.code {
                         KeyCode::Esc => app.close_help(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.close_help(),
+                        KeyCode::Char('L') | KeyCode::Char('l') => app.open_legend(),
+                        _ => {}
+                    },
+                    InputMode::Legend => match key.code {
+                        KeyCode::Esc => app.close_legend(),
+                        KeyCode::Char('L') | KeyCode::Char('l') => app.close_legend(),
+                        KeyCode::Up => app.previous_cursor(ui::legend_len()),
+                        KeyCode::Down => app.next_cursor(ui::legend_len()),
                         _ => {}
                     },
                     InputMode::Config => match key.code {

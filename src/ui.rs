@@ -56,6 +56,10 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
     if app.input_mode == InputMode::Config {
         render_config_menu(f, size, app);
     }
+
+    if app.input_mode == InputMode::Legend {
+        render_legend_menu(f, size, app);
+    }
 }
 
 fn render_full_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
@@ -186,6 +190,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
         Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
         Span::styled("[C]Config ", Style::default().fg(theme.dim)),
+        Span::styled("[L]Legend ", Style::default().fg(theme.dim)),
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
@@ -312,8 +317,10 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let now = SystemTime::now();
     let visible = indices.len();
     let total = app.data.aircraft.len();
-    let msg_rate = app.msg_rate_display();
-    let kbps = msg_rate.map(|rate| rate * 112.0 / 1000.0);
+    let msg_rate_total = app.msg_rate_display();
+    let msg_rate_avg = app.avg_aircraft_rate();
+    let kbps_total = msg_rate_total.map(|rate| rate * 112.0 / 1000.0);
+    let kbps_avg = msg_rate_avg.map(|rate| rate * 112.0 / 1000.0);
     let uptime = now
         .duration_since(app.start_time)
         .map(format_duration)
@@ -322,10 +329,6 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         .last_update
         .and_then(|t| now.duration_since(t).ok())
         .map(|d| format!("{}s", d.as_secs()))
-        .unwrap_or_else(|| "--".to_string());
-    let site_alt = app
-        .site()
-        .map(|site| format!("{:.1} m", site.alt_m))
         .unwrap_or_else(|| "--".to_string());
     let route_error = app
         .route_error
@@ -356,51 +359,35 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         }
     }
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("VISIBLE ", Style::default().fg(theme.dim)),
-            Span::styled(
-                format!("{visible}/{total}"),
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("MSG RATE ", Style::default().fg(theme.dim)),
-            Span::raw(match msg_rate {
-                Some(value) => format!("{value:.1}/s"),
-                None => "--".to_string(),
-            }),
-        ]),
-        Line::from(vec![
-            Span::styled("EST KBPS ", Style::default().fg(theme.dim)),
-            Span::raw(match kbps {
-                Some(value) => format!("{value:.1}"),
-                None => "--".to_string(),
-            }),
-        ]),
-        Line::from(vec![
-            Span::styled("SEEN 1/5/15 ", Style::default().fg(theme.dim)),
-            Span::raw(format!("{last_1}/{last_5}/{last_15}")),
-        ]),
-        Line::from(vec![
-            Span::styled("UPTIME ", Style::default().fg(theme.dim)),
-            Span::raw(uptime),
-        ]),
-        Line::from(vec![
-            Span::styled("LAST UPD ", Style::default().fg(theme.dim)),
-            Span::raw(last_update),
-        ]),
-        Line::from(vec![
-            Span::styled("SITE ALT ", Style::default().fg(theme.dim)),
-            Span::raw(site_alt),
-        ]),
-        Line::from(vec![
-            Span::styled("ROUTE ERR ", Style::default().fg(theme.dim)),
-            Span::raw(route_error),
-        ]),
-    ];
+    let ctx = StatsContext {
+        visible,
+        total,
+        msg_total: app.data.messages.unwrap_or(0),
+        msg_rate_total,
+        msg_rate_avg,
+        kbps_total,
+        kbps_avg,
+        last_1,
+        last_5,
+        last_15,
+        uptime,
+        last_update,
+        route_error,
+        site_alt: app
+            .site()
+            .map(|site| format!("{:.1} m", site.alt_m))
+            .unwrap_or_else(|| "--".to_string()),
+    };
+
+    let mut lines = Vec::new();
+    lines.push(stat_line("visible", &ctx, &theme, true));
+    for key in &app.stats_metrics {
+        lines.push(stat_line(key, &ctx, &theme, false));
+    }
+    lines.push(stat_line("seen_1_5_15", &ctx, &theme, false));
+    lines.push(stat_line("uptime", &ctx, &theme, false));
+    lines.push(stat_line("last_update", &ctx, &theme, false));
+    lines.push(stat_line("route_err", &ctx, &theme, false));
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -410,6 +397,97 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         .block(block)
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, area);
+}
+
+struct StatsContext {
+    visible: usize,
+    total: usize,
+    msg_total: u64,
+    msg_rate_total: Option<f64>,
+    msg_rate_avg: Option<f64>,
+    kbps_total: Option<f64>,
+    kbps_avg: Option<f64>,
+    last_1: usize,
+    last_5: usize,
+    last_15: usize,
+    uptime: String,
+    last_update: String,
+    route_error: String,
+    site_alt: String,
+}
+
+fn stat_line(key: &str, ctx: &StatsContext, theme: &Theme, emphasize: bool) -> Line<'static> {
+    let key = key.trim().to_ascii_lowercase();
+    let label = format!("{:<11}", stat_label(&key));
+    let value = stat_value(&key, ctx);
+    let label_style = if emphasize {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.dim)
+    };
+    let value_style = if emphasize {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.accent)
+    };
+    Line::from(vec![
+        Span::styled(label, label_style),
+        Span::styled(value, value_style),
+    ])
+}
+
+fn stat_label(key: &str) -> String {
+    match key {
+        "visible" => "VISIBLE".to_string(),
+        "aircraft" => "AIRCRAFT".to_string(),
+        "messages" => "MSGS".to_string(),
+        "msg_rate_total" => "TOT MSG/S".to_string(),
+        "msg_rate_avg" => "AVG MSG/S".to_string(),
+        "kbps_total" => "TOT KBPS".to_string(),
+        "kbps_avg" => "AVG KBPS".to_string(),
+        "seen_1_5_15" => "SEEN 1/5/15".to_string(),
+        "uptime" => "UPTIME".to_string(),
+        "last_update" => "LAST UPD".to_string(),
+        "site_alt" => "SITE ALT".to_string(),
+        "route_err" => "ROUTE ERR".to_string(),
+        _ => key.to_ascii_uppercase().replace('_', " "),
+    }
+}
+
+fn stat_value(key: &str, ctx: &StatsContext) -> String {
+    match key {
+        "visible" => format!("{}/{}", ctx.visible, ctx.total),
+        "aircraft" => ctx.total.to_string(),
+        "messages" => ctx.msg_total.to_string(),
+        "msg_rate_total" => fmt_rate(ctx.msg_rate_total),
+        "msg_rate_avg" => fmt_rate(ctx.msg_rate_avg),
+        "kbps_total" => fmt_kbps(ctx.kbps_total),
+        "kbps_avg" => fmt_kbps(ctx.kbps_avg),
+        "seen_1_5_15" => format!("{}/{}/{}", ctx.last_1, ctx.last_5, ctx.last_15),
+        "uptime" => ctx.uptime.clone(),
+        "last_update" => ctx.last_update.clone(),
+        "site_alt" => ctx.site_alt.clone(),
+        "route_err" => ctx.route_error.clone(),
+        _ => "--".to_string(),
+    }
+}
+
+fn fmt_rate(value: Option<f64>) -> String {
+    match value {
+        Some(rate) => format!("{rate:.1}/s"),
+        None => "--".to_string(),
+    }
+}
+
+fn fmt_kbps(value: Option<f64>) -> String {
+    match value {
+        Some(rate) => format!("{rate:.1}"),
+        None => "--".to_string(),
+    }
 }
 
 fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
@@ -917,6 +995,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         )),
         Line::from("  q          Quit"),
         Line::from("  ? / h      Toggle help"),
+        Line::from("  L          Legend"),
         Line::from(""),
         Line::from(Span::styled(
             "Press Esc to close",
@@ -928,6 +1007,69 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title("HELP");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_legend_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let popup = centered_rect(70, 22, area);
+    f.render_widget(Clear, popup);
+
+    let legend_items = legend_items();
+    let total_items = legend_items.len();
+    let reserved = 4;
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let mut start = if total_items > items_height {
+        app.config_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "LEGEND",
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    for (i, item) in legend_items.iter().enumerate().take(end).skip(start) {
+        let line = if i == app.config_cursor {
+            Line::from(Span::styled(
+                *item,
+                Style::default()
+                    .fg(theme.highlight_fg)
+                    .bg(theme.highlight_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(*item, Style::default().fg(theme.dim)))
+        };
+        lines.push(line);
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Up/Down scroll • L or Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("LEGEND");
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: true })
@@ -1027,6 +1169,46 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
         .wrap(Wrap { trim: true })
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, popup);
+}
+
+fn legend_items() -> Vec<&'static str> {
+    vec![
+        "Columns:",
+        "  FLIGHT   Callsign (may be blank)",
+        "  REG      Registration",
+        "  TYPE     Aircraft type",
+        "  ROUTE    Route (if available)",
+        "  ALT      Baro altitude (trend arrows)",
+        "  GS       Ground speed (kt)",
+        "  TRK      Track/heading (deg + arrow)",
+        "  LAT/LON  Position",
+        "  DIST     Distance from site (nm)",
+        "  BRG      Bearing from site (deg)",
+        "  SEEN     Seconds since last seen",
+        "  MSGS     Per‑aircraft message count",
+        "  HEX      ICAO hex",
+        "Alerts:",
+        "  STALE    Seen > stale_secs",
+        "  NOPOS    Missing position",
+        "  ALERT    Emergency flag",
+        "  SPI      Special Position ID",
+        "  LOWNIC   NIC below threshold",
+        "  LOWNAC   NACp below threshold",
+        "  FAV      Favorited aircraft",
+        "  NEAR     Within notify_radius_mi",
+        "  RERR     Route lookup error (recent)",
+        "Stats:",
+        "  MSG RATE Receiver msg/s (smoothed)",
+        "  EST KBPS Estimated kbps (approx)",
+        "Radar:",
+        "  *        Current position",
+        "  o        Trail point",
+        "  F/f      Favorite current/trail",
+    ]
+}
+
+pub fn legend_len() -> usize {
+    legend_items().len()
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
