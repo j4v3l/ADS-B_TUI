@@ -7,6 +7,7 @@ mod routes;
 mod runtime;
 mod storage;
 mod ui;
+mod watchlist;
 
 use anyhow::Result;
 use std::collections::HashSet;
@@ -19,7 +20,7 @@ use net::spawn_fetcher;
 use routes::spawn_route_fetcher;
 use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use std::path::PathBuf;
-use storage::load_favorites;
+use storage::{load_favorites, load_watchlist};
 
 fn main() -> Result<()> {
     let config = parse_args()?;
@@ -43,6 +44,20 @@ fn main() -> Result<()> {
     if let Some(path) = favorites_path.as_ref() {
         if let Ok(file_favs) = load_favorites(path) {
             favorites.extend(file_favs);
+        }
+    }
+
+    let watchlist_path = if config.watchlist_file.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(config.watchlist_file))
+    };
+    let mut watchlist = Vec::new();
+    if config.watchlist_enabled {
+        if let Some(path) = watchlist_path.as_ref() {
+            if let Ok(entries) = load_watchlist(path) {
+                watchlist = entries;
+            }
         }
     }
 
@@ -115,6 +130,9 @@ fn main() -> Result<()> {
             config.stats_metric_1.clone(),
             config.stats_metric_2.clone(),
             config.stats_metric_3.clone(),
+            config.watchlist_enabled,
+            watchlist_path.clone(),
+            watchlist,
         ),
         rx,
         route_channels,

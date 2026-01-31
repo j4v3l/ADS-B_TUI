@@ -10,7 +10,9 @@ use toml::Value;
 use toml_edit::DocumentMut;
 
 use crate::config;
+use crate::storage;
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
+use crate::watchlist::WatchEntry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortMode {
@@ -45,6 +47,7 @@ pub enum InputMode {
     Help,
     Config,
     Legend,
+    Watchlist,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +137,7 @@ pub struct Trend {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColumnId {
     Fav,
+    Watch,
     Flight,
     Reg,
     Type,
@@ -243,6 +247,9 @@ pub struct App {
     pub(crate) low_nac: i64,
     pub(crate) favorites: HashSet<String>,
     pub(crate) favorites_path: Option<PathBuf>,
+    pub(crate) watchlist_enabled: bool,
+    pub(crate) watchlist_path: Option<PathBuf>,
+    pub(crate) watchlist: Vec<WatchEntry>,
     pub(crate) filter: String,
     pub(crate) filter_edit: String,
     pub(crate) input_mode: InputMode,
@@ -257,6 +264,7 @@ pub struct App {
     pub(crate) config_edit: String,
     pub(crate) config_editing: bool,
     pub(crate) config_status: Option<(String, SystemTime)>,
+    pub(crate) watchlist_cursor: usize,
     pub(crate) trail_len: usize,
     pub(crate) site: Option<SiteLocation>,
     pub(crate) columns: Vec<ColumnConfig>,
@@ -292,6 +300,7 @@ pub struct App {
     pub(crate) overpass_mi: f64,
     pub(crate) notify_cooldown: Duration,
     notified_recent: HashMap<String, SystemTime>,
+    watch_notified_recent: HashMap<String, SystemTime>,
     pub(crate) notifications: Vec<Notification>,
     pub(crate) last_msg_total: Option<u64>,
     pub(crate) last_msg_time: Option<SystemTime>,
@@ -340,6 +349,9 @@ impl App {
         stats_metric_1: String,
         stats_metric_2: String,
         stats_metric_3: String,
+        watchlist_enabled: bool,
+        watchlist_path: Option<PathBuf>,
+        watchlist: Vec<WatchEntry>,
     ) -> Self {
         let mut table_state = TableState::default();
         table_state.select(Some(0));
@@ -366,6 +378,9 @@ impl App {
             low_nac,
             favorites,
             favorites_path,
+            watchlist_enabled,
+            watchlist_path,
+            watchlist,
             filter,
             filter_edit: String::new(),
             input_mode: InputMode::Normal,
@@ -384,12 +399,16 @@ impl App {
             config_edit: String::new(),
             config_editing: false,
             config_status: None,
+            watchlist_cursor: 0,
             trail_len: trail_len.max(1),
             site,
             columns: {
                 let mut cols = default_columns();
                 if let Some(flag_col) = cols.iter_mut().find(|c| c.id == ColumnId::Flag) {
                     flag_col.visible = flags_enabled;
+                }
+                if let Some(watch_col) = cols.iter_mut().find(|c| c.id == ColumnId::Watch) {
+                    watch_col.visible = watchlist_enabled;
                 }
                 cols
             },
@@ -432,6 +451,7 @@ impl App {
                 notify_cooldown
             },
             notified_recent: HashMap::new(),
+            watch_notified_recent: HashMap::new(),
             notifications: Vec::new(),
             last_msg_total: None,
             last_msg_time: None,
@@ -452,6 +472,7 @@ impl App {
         self.update_trends(&data);
         self.update_trails(&data, now_time);
         self.update_notifications(&data, now_time);
+        self.update_watchlist_notifications(&data, now_time);
 
         self.raw_data = data;
         if !self.smooth_mode {
@@ -531,6 +552,108 @@ impl App {
 
     pub fn close_legend(&mut self) {
         self.input_mode = InputMode::Help;
+    }
+
+    pub fn open_watchlist(&mut self) {
+        self.watchlist_cursor = 0;
+        self.input_mode = InputMode::Watchlist;
+    }
+
+    pub fn close_watchlist(&mut self) {
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn save_watchlist(&mut self) {
+        let now = SystemTime::now();
+        let Some(path) = self.watchlist_path.as_ref() else {
+            self.notifications.push(Notification {
+                message: "WATCHLIST no file path".to_string(),
+                at: now,
+            });
+            return;
+        };
+        match storage::save_watchlist(path, &self.watchlist) {
+            Ok(_) => self.notifications.push(Notification {
+                message: "WATCHLIST saved".to_string(),
+                at: now,
+            }),
+            Err(err) => self.notifications.push(Notification {
+                message: format!("WATCHLIST ERR {err}"),
+                at: now,
+            }),
+        }
+    }
+
+    pub fn toggle_watchlist_enabled_selected(&mut self) -> bool {
+        if let Some(entry) = self.watchlist.get_mut(self.watchlist_cursor) {
+            let next = !entry.is_enabled();
+            entry.enabled = Some(next);
+            self.save_watchlist();
+            return true;
+        }
+        false
+    }
+
+    pub fn toggle_watchlist_notify_selected(&mut self) -> bool {
+        if let Some(entry) = self.watchlist.get_mut(self.watchlist_cursor) {
+            let next = !entry.notify_enabled();
+            entry.notify = Some(next);
+            self.save_watchlist();
+            return true;
+        }
+        false
+    }
+
+    pub fn delete_watchlist_selected(&mut self) -> bool {
+        if self.watchlist.is_empty() {
+            return false;
+        }
+        if self.watchlist_cursor >= self.watchlist.len() {
+            self.watchlist_cursor = self.watchlist.len() - 1;
+        }
+        self.watchlist.remove(self.watchlist_cursor);
+        if self.watchlist_cursor >= self.watchlist.len() && !self.watchlist.is_empty() {
+            self.watchlist_cursor = self.watchlist.len() - 1;
+        }
+        self.save_watchlist();
+        true
+    }
+
+    pub fn watchlist_len(&self) -> usize {
+        self.watchlist.len()
+    }
+
+    pub fn next_watchlist_item(&mut self) {
+        if self.watchlist.is_empty() {
+            return;
+        }
+        self.watchlist_cursor = (self.watchlist_cursor + 1) % self.watchlist.len();
+    }
+
+    pub fn previous_watchlist_item(&mut self) {
+        if self.watchlist.is_empty() {
+            return;
+        }
+        if self.watchlist_cursor == 0 {
+            self.watchlist_cursor = self.watchlist.len() - 1;
+        } else {
+            self.watchlist_cursor -= 1;
+        }
+    }
+
+    pub fn watchlist_page_up(&mut self, window: usize) {
+        if self.watchlist.is_empty() || window == 0 {
+            return;
+        }
+        self.watchlist_cursor = self.watchlist_cursor.saturating_sub(window);
+    }
+
+    pub fn watchlist_page_down(&mut self, window: usize) {
+        if self.watchlist.is_empty() || window == 0 {
+            return;
+        }
+        let next = self.watchlist_cursor.saturating_add(window);
+        self.watchlist_cursor = next.min(self.watchlist.len().saturating_sub(1));
     }
 
     pub fn open_config(&mut self) {
@@ -891,6 +1014,36 @@ impl App {
 
     pub fn favorites_path(&self) -> Option<&PathBuf> {
         self.favorites_path.as_ref()
+    }
+
+    pub fn watchlist_path(&self) -> Option<&PathBuf> {
+        self.watchlist_path.as_ref()
+    }
+
+    pub fn is_watchlisted(&self, ac: &Aircraft) -> bool {
+        self.watch_entry_for(ac).is_some()
+    }
+
+    pub fn watch_entry_for(&self, ac: &Aircraft) -> Option<&WatchEntry> {
+        if !self.watchlist_enabled {
+            return None;
+        }
+        let mut best: Option<&WatchEntry> = None;
+        let mut best_priority = i64::MIN;
+        for entry in &self.watchlist {
+            if !entry.is_enabled() {
+                continue;
+            }
+            if !watch_entry_matches(entry, ac, self.route_for(ac)) {
+                continue;
+            }
+            let prio = entry.priority();
+            if best.is_none() || prio > best_priority {
+                best_priority = prio;
+                best = Some(entry);
+            }
+        }
+        best
     }
 
     pub fn site(&self) -> Option<SiteLocation> {
@@ -1353,6 +1506,61 @@ impl App {
         }
     }
 
+    fn update_watchlist_notifications(&mut self, data: &ApiResponse, now: SystemTime) {
+        if !self.watchlist_enabled || self.watchlist.is_empty() {
+            return;
+        }
+
+        let max_age_secs = self.notify_cooldown.as_secs().saturating_mul(4).max(60);
+        let max_age = Duration::from_secs(max_age_secs);
+        self.watch_notified_recent
+            .retain(|_, last| now.duration_since(*last).map(|d| d <= max_age).unwrap_or(true));
+
+        for ac in &data.aircraft {
+            let Some(entry) = self.watch_entry_for(ac).cloned() else {
+                continue;
+            };
+            if !entry.notify_enabled() {
+                continue;
+            }
+            let key = if let Some(hex) = ac.hex.as_deref() {
+                format!("hex:{}", normalize_hex(hex))
+            } else if let Some(flight) = ac.flight.as_deref() {
+                format!("flt:{}", normalize_callsign(flight))
+            } else {
+                continue;
+            };
+            let entry_id = entry.entry_id();
+            let notify_key = format!("watch:{entry_id}:{key}");
+            let should_notify = match self.watch_notified_recent.get(&notify_key) {
+                Some(last) => now
+                    .duration_since(*last)
+                    .map(|d| d >= self.notify_cooldown)
+                    .unwrap_or(true),
+                None => true,
+            };
+            if !should_notify {
+                continue;
+            }
+            self.watch_notified_recent.insert(notify_key, now);
+
+            let callsign = ac.flight.as_deref().unwrap_or("--").trim();
+            let reg = ac.r.as_deref().unwrap_or("--");
+            let label = entry
+                .label
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(entry_id.as_str());
+            let message = format!("WATCH {label} {callsign} {reg}");
+            self.notifications.push(Notification { message, at: now });
+        }
+
+        if self.notifications.len() > 10 {
+            let excess = self.notifications.len() - 10;
+            self.notifications.drain(0..excess);
+        }
+    }
+
     fn swap_snapshot(&mut self) {
         let mut next = self.raw_data.clone();
         if self.smooth_merge {
@@ -1390,6 +1598,78 @@ fn normalize_hex(value: &str) -> String {
 
 fn normalize_callsign(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn normalize_text(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn match_text(needle: &str, haystack: &str, mode: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    match mode {
+        "prefix" => haystack.starts_with(needle),
+        "contains" => haystack.contains(needle),
+        _ => haystack == needle,
+    }
+}
+
+fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteInfo>) -> bool {
+    let match_type = entry.match_type.trim().to_ascii_lowercase();
+    let mode = entry.match_mode();
+    let value = entry.value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    match match_type.as_str() {
+        "hex" | "icao" | "icao_hex" => ac
+            .hex
+            .as_deref()
+            .map(|hex| match_text(&normalize_hex(value), &normalize_hex(hex), mode))
+            .unwrap_or(false),
+        "callsign" | "flight" | "cs" => ac
+            .flight
+            .as_deref()
+            .map(|cs| match_text(&normalize_callsign(value), &normalize_callsign(cs), mode))
+            .unwrap_or(false),
+        "reg" | "registration" => ac
+            .r
+            .as_deref()
+            .map(|reg| match_text(&normalize_text(value), &normalize_text(reg), mode))
+            .unwrap_or(false),
+        "type" => ac
+            .t
+            .as_deref()
+            .map(|t| match_text(&normalize_text(value), &normalize_text(t), mode))
+            .unwrap_or(false),
+        "owner" | "operator" | "ownop" => ac
+            .own_op
+            .as_deref()
+            .map(|owner| match_text(&normalize_text(value), &normalize_text(owner), mode))
+            .unwrap_or(false),
+        "category" => ac
+            .category
+            .as_deref()
+            .map(|cat| match_text(&normalize_text(value), &normalize_text(cat), mode))
+            .unwrap_or(false),
+        "route" => {
+            let Some(info) = route else { return false };
+            let mut route_text = String::new();
+            if let (Some(origin), Some(dest)) = (info.origin.as_ref(), info.destination.as_ref()) {
+                if !origin.trim().is_empty() && !dest.trim().is_empty() {
+                    route_text = format!("{origin}-{dest}");
+                }
+            }
+            if route_text.is_empty() {
+                if let Some(route) = info.route.as_ref() {
+                    route_text = route.clone();
+                }
+            }
+            match_text(&normalize_text(value), &normalize_text(&route_text), mode)
+        }
+        _ => false,
+    }
 }
 
 fn compare_i64(prev: Option<i64>, current: Option<i64>) -> TrendDir {
@@ -1520,6 +1800,12 @@ fn default_columns() -> Vec<ColumnConfig> {
         ColumnConfig {
             id: ColumnId::Fav,
             label: "*",
+            width: 1,
+            visible: true,
+        },
+        ColumnConfig {
+            id: ColumnId::Watch,
+            label: "W",
             width: 1,
             visible: true,
         },
@@ -1681,6 +1967,16 @@ fn default_config_items() -> Vec<ConfigItem> {
         "favorites_file",
         ConfigKind::Str,
         config::DEFAULT_FAVORITES_FILE.to_string(),
+    );
+    push_item(
+        "watchlist_enabled",
+        ConfigKind::Bool,
+        config::DEFAULT_WATCHLIST_ENABLED.to_string(),
+    );
+    push_item(
+        "watchlist_file",
+        ConfigKind::Str,
+        config::DEFAULT_WATCHLIST_FILE.to_string(),
     );
     push_item("filter", ConfigKind::Str, "".to_string());
     push_item("layout", ConfigKind::Str, "full".to_string());
