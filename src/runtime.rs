@@ -107,6 +107,7 @@ pub fn run_app(
                         KeyCode::Char('l') => app.toggle_layout(),
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
+                        KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
                         KeyCode::Char('e') => {
                             if let Ok(path) = export::export_csv(&app, &indices) {
@@ -151,6 +152,27 @@ pub fn run_app(
                         KeyCode::Char('L') | KeyCode::Char('l') => app.close_legend(),
                         KeyCode::Up => app.previous_cursor(ui::legend_len()),
                         KeyCode::Down => app.next_cursor(ui::legend_len()),
+                        _ => {}
+                    },
+                    InputMode::Watchlist => match key.code {
+                        KeyCode::Esc => app.close_watchlist(),
+                        KeyCode::Char('W') | KeyCode::Char('w') => app.close_watchlist(),
+                        KeyCode::Up => app.previous_watchlist_item(),
+                        KeyCode::Down => app.next_watchlist_item(),
+                        KeyCode::PageUp => app.watchlist_page_up(10),
+                        KeyCode::PageDown => app.watchlist_page_down(10),
+                        KeyCode::Char('e') => {
+                            app.toggle_watchlist_enabled_selected();
+                        }
+                        KeyCode::Char('n') => {
+                            app.toggle_watchlist_notify_selected();
+                        }
+                        KeyCode::Char('d') => {
+                            app.delete_watchlist_selected();
+                        }
+                        KeyCode::Char('s') => {
+                            app.save_watchlist();
+                        }
                         _ => {}
                     },
                     InputMode::Config => match key.code {

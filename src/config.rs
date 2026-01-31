@@ -12,6 +12,8 @@ pub const DEFAULT_LOW_NIC: i64 = 5;
 pub const DEFAULT_LOW_NAC: i64 = 8;
 pub const DEFAULT_TRAIL_LEN: u64 = 6;
 pub const DEFAULT_FAVORITES_FILE: &str = "adsb-favorites.txt";
+pub const DEFAULT_WATCHLIST_FILE: &str = "adsb-watchlist.toml";
+pub const DEFAULT_WATCHLIST_ENABLED: bool = true;
 pub const DEFAULT_ROUTE_BASE: &str = "https://api.adsb.lol";
 pub const DEFAULT_ROUTE_TTL_SECS: u64 = 3600;
 pub const DEFAULT_ROUTE_REFRESH_SECS: u64 = 15;
@@ -47,6 +49,8 @@ pub struct Config {
     pub trail_len: u64,
     pub favorites: Vec<String>,
     pub favorites_file: String,
+    pub watchlist_enabled: bool,
+    pub watchlist_file: String,
     pub filter: String,
     pub layout: String,
     pub theme: String,
@@ -89,6 +93,8 @@ struct FileConfig {
     trail_len: Option<u64>,
     favorites: Option<Vec<String>>,
     favorites_file: Option<String>,
+    watchlist_enabled: Option<bool>,
+    watchlist_file: Option<String>,
     filter: Option<String>,
     layout: Option<String>,
     theme: Option<String>,
@@ -150,6 +156,8 @@ pub fn parse_args() -> Result<Config> {
         trail_len: DEFAULT_TRAIL_LEN,
         favorites: Vec::new(),
         favorites_file: DEFAULT_FAVORITES_FILE.to_string(),
+        watchlist_enabled: DEFAULT_WATCHLIST_ENABLED,
+        watchlist_file: DEFAULT_WATCHLIST_FILE.to_string(),
         filter: String::new(),
         layout: "full".to_string(),
         theme: "default".to_string(),
@@ -234,6 +242,12 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_FAVORITES_FILE") {
         config.favorites_file = value;
+    }
+    if let Ok(value) = env::var("ADSB_WATCHLIST_ENABLED") {
+        config.watchlist_enabled = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_WATCHLIST_FILE") {
+        config.watchlist_file = value;
     }
     if let Ok(value) = env::var("ADSB_LAYOUT") {
         config.layout = value;
@@ -409,6 +423,18 @@ pub fn parse_args() -> Result<Config> {
                     .next()
                     .ok_or_else(|| anyhow!("--favorites-file needs a value"))?
                     .to_string();
+            }
+            "--watchlist-file" => {
+                config.watchlist_file = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--watchlist-file needs a value"))?
+                    .to_string();
+            }
+            "--watchlist" => {
+                config.watchlist_enabled = true;
+            }
+            "--no-watchlist" => {
+                config.watchlist_enabled = false;
             }
             "--layout" => {
                 config.layout = iter
@@ -622,6 +648,12 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(favorites_file) = file.favorites_file {
         target.favorites_file = favorites_file;
     }
+    if let Some(watchlist_enabled) = file.watchlist_enabled {
+        target.watchlist_enabled = watchlist_enabled;
+    }
+    if let Some(watchlist_file) = file.watchlist_file {
+        target.watchlist_file = watchlist_file;
+    }
     if let Some(filter) = file.filter {
         target.filter = filter;
     }
@@ -714,7 +746,10 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
 fn print_help() {
     println!("adsb-tui");
     println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
-    println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
+    println!(
+        "       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]"
+    );
+    println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
     println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
     println!(
         "       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]"
@@ -735,6 +770,7 @@ fn print_help() {
     println!("Environment: ADSB_CONFIG overrides config path");
     println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
     println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
+    println!("Environment: ADSB_WATCHLIST_ENABLED/FILE configure watchlist loading");
     println!("Environment: ADSB_SITE_LAT/LON/ALT_M set receiver location");
     println!("Environment: ADSB_ROUTE_* configure route lookups");
     println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");

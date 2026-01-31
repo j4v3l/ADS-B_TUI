@@ -17,6 +17,7 @@ struct Theme {
     highlight_fg: Color,
     highlight_bg: Color,
     fav: Color,
+    watch: Color,
     row_even_bg: Color,
     row_odd_bg: Color,
     header_bg: Color,
@@ -59,6 +60,10 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
 
     if app.input_mode == InputMode::Legend {
         render_legend_menu(f, size, app);
+    }
+
+    if app.input_mode == InputMode::Watchlist {
+        render_watchlist_menu(f, size, app);
     }
 }
 
@@ -194,6 +199,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
         Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
         Span::styled("[C]Config ", Style::default().fg(theme.dim)),
+        Span::styled("[W]Watch ", Style::default().fg(theme.dim)),
         Span::styled("[L]Legend ", Style::default().fg(theme.dim)),
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
@@ -639,6 +645,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         let seen = seen_seconds(ac);
         let stale = seen.map(|s| s > app.stale_secs).unwrap_or(true);
         let favorite = app.is_favorite(ac);
+        let watchlisted = app.is_watchlisted(ac);
         let trend = app.trend_for(ac);
         let overpass = match (app.site(), ac.lat, ac.lon) {
             (Some(site), Some(lat), Some(lon)) => {
@@ -670,6 +677,8 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
             } else {
                 style.fg(theme.dim)
             };
+        } else if watchlisted {
+            style = style.fg(theme.watch).add_modifier(Modifier::BOLD);
         }
 
         let route = app.route_for(ac);
@@ -680,6 +689,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 *width as usize,
                 ac,
                 favorite,
+                watchlisted,
                 seen,
                 trend,
                 route,
@@ -750,6 +760,11 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let sil = fmt_i64(ac.sil, 0);
         let rssi = fmt_f64(ac.rssi, 0, 1);
         let favorite = if app.is_favorite(ac) { "YES" } else { "NO" };
+        let watch_text = if let Some(entry) = app.watch_entry_for(ac) {
+            format!("YES {}", entry.entry_id())
+        } else {
+            "NO".to_string()
+        };
         let route_info = app.route_for(ac);
         let route_pending = route_pending_for(app, ac, route_info);
         let route = if route_pending {
@@ -820,6 +835,10 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             Line::from(vec![
                 Span::styled("FAVORITE ", Style::default().fg(theme.dim)),
                 Span::raw(favorite),
+            ]),
+            Line::from(vec![
+                Span::styled("WATCH    ", Style::default().fg(theme.dim)),
+                Span::raw(watch_text),
             ]),
             Line::from(""),
             Line::from(vec![
@@ -909,7 +928,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  C config  ? help".to_string();
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  w watch  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -1012,6 +1031,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  l          Toggle layout"),
         Line::from("  t          Toggle theme"),
         Line::from("  m          Columns menu"),
+        Line::from("  w          Watchlist"),
         Line::from(""),
         Line::from(Span::styled(
             "Filter & Favorites",
@@ -1027,6 +1047,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         )),
         Line::from("  e / E      Export CSV / JSON"),
         Line::from("  C          Config editor"),
+        Line::from("  W          Watchlist menu"),
         Line::from(""),
         Line::from(Span::styled(
             "Quit",
@@ -1060,7 +1081,7 @@ fn render_legend_menu(f: &mut Frame, area: Rect, app: &App) {
 
     let legend_items = legend_items();
     let total_items = legend_items.len();
-    let reserved = 4;
+    let reserved = 5;
     let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
     let mut start = if total_items > items_height {
         app.config_cursor.saturating_sub(items_height / 2)
@@ -1210,6 +1231,107 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, popup);
 }
 
+fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let total_items = app.watchlist_len();
+    let height = (total_items.max(1) + 6).min(24) as u16;
+    let popup = centered_rect(72, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "WATCHLIST",
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    let path_text = app
+        .watchlist_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "--".to_string());
+    lines.push(Line::from(Span::styled(
+        format!("FILE {path_text}"),
+        Style::default().fg(theme.dim),
+    )));
+    lines.push(Line::from(""));
+
+    let reserved = 4;
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let mut start = if total_items > items_height {
+        app.watchlist_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+
+    if total_items == 0 {
+        lines.push(Line::from(Span::styled(
+            "No watchlist entries.",
+            Style::default().fg(theme.dim),
+        )));
+    } else {
+        for (i, entry) in app.watchlist.iter().enumerate().take(end).skip(start) {
+            let enabled = if entry.is_enabled() { "ON " } else { "OFF" };
+            let notify = if entry.notify_enabled() { "N" } else { "-" };
+            let entry_id = entry.entry_id();
+            let label = entry
+                .label
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(entry_id.as_str());
+            let mode = entry.match_mode();
+            let match_text = format!("{}={}", entry.match_type, entry.value);
+            let text = format!(
+                "{enabled} {notify}  {:<18}  {}  ({})",
+                truncate(label, 18),
+                truncate(&match_text, 28),
+                mode
+            );
+            let line = if i == app.watchlist_cursor {
+                Line::from(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(theme.highlight_fg)
+                        .bg(theme.highlight_bg)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(text, Style::default().fg(theme.dim)))
+            };
+            lines.push(line);
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "e toggle enabled • n toggle notify • d delete • s save",
+        Style::default().fg(theme.dim),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Up/Down select • Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("WATCHLIST");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
 fn legend_items() -> Vec<&'static str> {
     vec![
         "Columns:",
@@ -1226,6 +1348,7 @@ fn legend_items() -> Vec<&'static str> {
         "  SEEN     Seconds since last seen",
         "  MSGS     Per‑aircraft message count",
         "  HEX      ICAO hex",
+        "  W        Watchlist match",
         "Alerts:",
         "  STALE    Seen > stale_secs",
         "  NOPOS    Missing position",
@@ -1503,6 +1626,7 @@ fn select_columns_for_width(
         ColumnId::Alt,
         ColumnId::Type,
         ColumnId::Flight,
+        ColumnId::Watch,
         ColumnId::Fav,
         ColumnId::Flag,
     ];
@@ -1599,6 +1723,13 @@ fn compute_column_widths(
                 ColumnId::Fav => {
                     if app.is_favorite(ac) {
                         "*".to_string()
+                    } else {
+                        " ".to_string()
+                    }
+                }
+                ColumnId::Watch => {
+                    if app.is_watchlisted(ac) {
+                        "W".to_string()
                     } else {
                         " ".to_string()
                     }
@@ -1701,6 +1832,7 @@ fn cell_for_column(
     width: usize,
     ac: &crate::model::Aircraft,
     favorite: bool,
+    watchlisted: bool,
     seen: Option<f64>,
     trend: crate::app::Trend,
     route: Option<&crate::app::RouteInfo>,
@@ -1714,6 +1846,13 @@ fn cell_for_column(
         ColumnId::Fav => {
             if favorite {
                 "*".to_string()
+            } else {
+                " ".to_string()
+            }
+        }
+        ColumnId::Watch => {
+            if watchlisted {
+                "W".to_string()
             } else {
                 " ".to_string()
             }
@@ -1746,6 +1885,8 @@ fn cell_for_column(
 
     if id == ColumnId::Fav && favorite {
         Cell::from(text).style(Style::default().fg(theme.fav).add_modifier(Modifier::BOLD))
+    } else if id == ColumnId::Watch && watchlisted {
+        Cell::from(text).style(Style::default().fg(theme.watch).add_modifier(Modifier::BOLD))
     } else {
         Cell::from(text)
     }
@@ -1816,6 +1957,7 @@ fn truncate(value: &str, max: usize) -> String {
 fn column_name(id: ColumnId) -> &'static str {
     match id {
         ColumnId::Fav => "FAVORITE",
+        ColumnId::Watch => "WATCHLIST",
         ColumnId::Flight => "FLIGHT",
         ColumnId::Reg => "REG",
         ColumnId::Type => "TYPE",
@@ -1999,6 +2141,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(200, 200, 200),
             fav: Color::Yellow,
+            watch: Color::LightBlue,
             row_even_bg: Color::Rgb(20, 20, 24),
             row_odd_bg: Color::Rgb(12, 12, 16),
             header_bg: Color::Rgb(24, 24, 28),
@@ -2012,6 +2155,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::LightCyan,
             fav: Color::LightCyan,
+            watch: Color::Yellow,
             row_even_bg: Color::Rgb(16, 22, 26),
             row_odd_bg: Color::Rgb(10, 16, 20),
             header_bg: Color::Rgb(20, 26, 30),
@@ -2025,6 +2169,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(255, 220, 120),
             fav: Color::Rgb(255, 191, 0),
+            watch: Color::LightBlue,
             row_even_bg: Color::Rgb(28, 22, 12),
             row_odd_bg: Color::Rgb(20, 16, 10),
             header_bg: Color::Rgb(32, 24, 14),
@@ -2038,6 +2183,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(0, 200, 220),
             fav: Color::Rgb(0, 200, 220),
+            watch: Color::LightYellow,
             row_even_bg: Color::Rgb(10, 20, 26),
             row_odd_bg: Color::Rgb(8, 16, 22),
             header_bg: Color::Rgb(12, 24, 30),
@@ -2051,6 +2197,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Green,
             fav: Color::Green,
+            watch: Color::LightCyan,
             row_even_bg: Color::Rgb(0, 18, 0),
             row_odd_bg: Color::Rgb(0, 12, 0),
             header_bg: Color::Rgb(0, 22, 0),

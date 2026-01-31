@@ -6,6 +6,7 @@ adsb-snapshot-*.csv
 adsb-snapshot-*.json
 adsb-favorites.txt
 adsb-tui.toml
+adsb-watchlist.toml
 
 # OS/editor
 .DS_Store
