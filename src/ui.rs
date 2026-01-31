@@ -1181,8 +1181,8 @@ fn truncate_to_width(mut value: String, width: usize) -> String {
     if width == 0 {
         return value;
     }
-    if value.len() > width {
-        value.truncate(width);
+    if text_len(&value) > width {
+        value = value.chars().take(width).collect();
     }
     value
 }
@@ -1191,7 +1191,7 @@ fn center_text(value: &str, width: usize) -> String {
     if width == 0 {
         return value.to_string();
     }
-    let len = value.len();
+    let len = text_len(value);
     if len >= width {
         return value.to_string();
     }
@@ -1206,6 +1206,10 @@ fn center_text(value: &str, width: usize) -> String {
         out.push(' ');
     }
     out
+}
+
+fn text_len(value: &str) -> usize {
+    value.chars().count()
 }
 
 fn select_columns_for_width(
@@ -1274,7 +1278,7 @@ fn compute_column_widths(
     let mut desired: Vec<usize> = columns.iter().map(|col| col.width as usize).collect();
 
     for (i, col) in columns.iter().enumerate() {
-        desired[i] = desired[i].max(col.label.len());
+        desired[i] = desired[i].max(text_len(col.label));
     }
 
     let sample_limit = indices.len().min(50);
@@ -1308,7 +1312,7 @@ fn compute_column_widths(
                 ColumnId::Msgs => fmt_u64(ac.messages, 0),
                 ColumnId::Hex => fmt_text(ac.hex.as_deref()),
             };
-            desired[i] = desired[i].max(value.len());
+            desired[i] = desired[i].max(text_len(&value));
         }
     }
 
@@ -1476,12 +1480,13 @@ fn short_source(url: &str) -> String {
 }
 
 fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
+    if text_len(value) <= max {
         value.to_string()
     } else if max <= 3 {
-        value[..max].to_string()
+        value.chars().take(max).collect()
     } else {
-        format!("{}...", &value[..(max - 3)])
+        let head: String = value.chars().take(max - 3).collect();
+        format!("{head}...")
     }
 }
 
