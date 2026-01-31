@@ -209,6 +209,14 @@ pub struct RouteInfo {
     pub fetched_at: SystemTime,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct AircraftRate {
+    last_messages: u64,
+    last_time: SystemTime,
+    ema: Option<f64>,
+    rate: Option<f64>,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct Metrics {
     alt_baro: Option<i64>,
@@ -272,6 +280,8 @@ pub struct App {
     msg_rate_window: Duration,
     msg_rate_min_secs: f64,
     msg_samples: VecDeque<(SystemTime, u64)>,
+    aircraft_rates: HashMap<String, AircraftRate>,
+    avg_aircraft_rate: Option<f64>,
     pub(crate) notify_radius_mi: f64,
     pub(crate) overpass_mi: f64,
     pub(crate) notify_cooldown: Duration,
@@ -392,6 +402,8 @@ impl App {
             },
             msg_rate_min_secs: rate_min_secs.max(0.05),
             msg_samples: VecDeque::new(),
+            aircraft_rates: HashMap::new(),
+            avg_aircraft_rate: None,
             notify_radius_mi: notify_radius_mi.max(0.1),
             overpass_mi: overpass_mi.max(0.05),
             notify_cooldown: if notify_cooldown.is_zero() {
@@ -415,6 +427,7 @@ impl App {
     pub fn apply_update(&mut self, data: ApiResponse) {
         let now_time = SystemTime::now();
         self.update_rate(&data, now_time);
+        self.update_aircraft_rates(&data, now_time);
         self.update_seen_times(&data, now_time);
         self.update_trends(&data);
         self.update_trails(&data, now_time);
@@ -863,6 +876,10 @@ impl App {
         self.msg_rate.or(self.msg_rate_display)
     }
 
+    pub fn avg_aircraft_rate(&self) -> Option<f64> {
+        self.avg_aircraft_rate
+    }
+
     pub fn route_refresh_due(&mut self, now: SystemTime) -> bool {
         if self.route_refresh.as_secs() == 0 && self.route_refresh.subsec_nanos() == 0 {
             return true;
@@ -1109,6 +1126,68 @@ impl App {
             self.msg_rate_last_display = Some(now_time);
         }
         // Keep the last known rate indefinitely
+    }
+
+    fn update_aircraft_rates(&mut self, data: &ApiResponse, now_time: SystemTime) {
+        let mut present = HashSet::new();
+        let mut sum = 0.0;
+        let mut count = 0usize;
+
+        for ac in &data.aircraft {
+            let key = if let Some(hex) = ac.hex.as_deref() {
+                format!("hex:{}", normalize_hex(hex))
+            } else if let Some(flight) = ac.flight.as_deref() {
+                format!("flt:{}", normalize_callsign(flight))
+            } else {
+                continue;
+            };
+            present.insert(key.clone());
+
+            let Some(messages) = ac.messages else {
+                continue;
+            };
+
+            let entry = self
+                .aircraft_rates
+                .entry(key)
+                .or_insert_with(|| AircraftRate {
+                    last_messages: messages,
+                    last_time: now_time,
+                    ema: None,
+                    rate: None,
+                });
+
+            if messages < entry.last_messages {
+                entry.ema = None;
+                entry.rate = None;
+            } else if messages > entry.last_messages {
+                if let Ok(delta_t) = now_time.duration_since(entry.last_time) {
+                    let secs = delta_t.as_secs_f64().max(self.msg_rate_min_secs);
+                    let inst = (messages - entry.last_messages) as f64 / secs;
+                    let ema = match entry.ema {
+                        Some(prev) => 0.45 * inst + 0.55 * prev,
+                        None => inst,
+                    };
+                    entry.ema = Some(ema);
+                    entry.rate = Some(ema);
+                }
+            }
+
+            entry.last_messages = messages;
+            entry.last_time = now_time;
+
+            if let Some(rate) = entry.rate {
+                sum += rate;
+                count += 1;
+            }
+        }
+
+        self.aircraft_rates.retain(|key, _| present.contains(key));
+        self.avg_aircraft_rate = if count > 0 {
+            Some(sum / count as f64)
+        } else {
+            None
+        };
     }
 
     fn update_seen_times(&mut self, data: &ApiResponse, now_time: SystemTime) {
