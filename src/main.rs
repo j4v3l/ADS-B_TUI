@@ -90,6 +90,8 @@ fn main() -> Result<()> {
             config.filter,
             layout_mode,
             theme_mode,
+            config.column_cache,
+            Duration::from_millis(400),
             config.config_path.clone(),
             config.trail_len as usize,
             favorites_path.clone(),

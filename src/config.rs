@@ -28,6 +28,7 @@ pub const DEFAULT_NOTIFY_RADIUS_MI: f64 = 10.0;
 pub const DEFAULT_OVERPASS_MI: f64 = 0.5;
 pub const DEFAULT_NOTIFY_COOLDOWN_SECS: u64 = 120;
 pub const DEFAULT_ALTITUDE_TREND_ARROWS: bool = true;
+pub const DEFAULT_COLUMN_CACHE: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -64,6 +65,7 @@ pub struct Config {
     pub overpass_mi: f64,
     pub notify_cooldown_secs: u64,
     pub altitude_trend_arrows: bool,
+    pub column_cache: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -100,6 +102,7 @@ struct FileConfig {
     overpass_mi: Option<f64>,
     notify_cooldown_secs: Option<u64>,
     altitude_trend_arrows: Option<bool>,
+    column_cache: Option<bool>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -155,6 +158,7 @@ pub fn parse_args() -> Result<Config> {
         overpass_mi: DEFAULT_OVERPASS_MI,
         notify_cooldown_secs: DEFAULT_NOTIFY_COOLDOWN_SECS,
         altitude_trend_arrows: DEFAULT_ALTITUDE_TREND_ARROWS,
+        column_cache: DEFAULT_COLUMN_CACHE,
     };
 
     if config_path.exists() {
@@ -299,6 +303,12 @@ pub fn parse_args() -> Result<Config> {
         if let Ok(val) = value.parse::<u64>() {
             config.notify_cooldown_secs = val.max(10);
         }
+    }
+    if let Ok(value) = env::var("ADSB_ALT_TREND") {
+        config.altitude_trend_arrows = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_COLUMN_CACHE") {
+        config.column_cache = matches!(value.as_str(), "1" | "true" | "yes" | "on");
     }
 
     let mut iter = args.iter();
@@ -501,6 +511,12 @@ pub fn parse_args() -> Result<Config> {
                     .ok_or_else(|| anyhow!("--notify-cooldown needs a value"))?;
                 config.notify_cooldown_secs = value.parse::<u64>()?.max(10);
             }
+            "--column-cache" => {
+                config.column_cache = true;
+            }
+            "--no-column-cache" => {
+                config.column_cache = false;
+            }
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -619,6 +635,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(altitude_trend_arrows) = file.altitude_trend_arrows {
         target.altitude_trend_arrows = altitude_trend_arrows;
     }
+    if let Some(column_cache) = file.column_cache {
+        target.column_cache = column_cache;
+    }
 }
 
 fn print_help() {
@@ -634,6 +653,7 @@ fn print_help() {
     println!("       [--ui-fps FPS] [--smooth] [--no-smooth] [--smooth-merge] [--no-smooth-merge]");
     println!("       [--rate-window-ms MS] [--rate-min-secs SECS]");
     println!("       [--notify-mi MILES] [--overpass-mi MILES] [--notify-cooldown SECS]");
+    println!("       [--column-cache] [--no-column-cache]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("Environment: ADSB_URL overrides the default URL");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
@@ -645,6 +665,8 @@ fn print_help() {
     println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");
     println!("Environment: ADSB_RATE_WINDOW_MS ADSB_RATE_MIN_SECS control msg rate smoothing");
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
+    println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
+    println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | e export csv | E export json");
     println!("      C config editor");

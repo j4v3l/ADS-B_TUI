@@ -323,10 +323,9 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let mut last_1 = 0usize;
     let mut last_5 = 0usize;
     let mut last_15 = 0usize;
-
-    for time in app.seen_times.values() {
-        if let Ok(delta) = now.duration_since(*time) {
-            let secs = delta.as_secs();
+    for ac in &app.data.aircraft {
+        if let Some(secs) = seen_seconds(ac) {
+            let secs = secs.max(0.0) as u64;
             if secs <= 60 {
                 last_1 += 1;
             }
@@ -483,7 +482,22 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         return;
     }
 
-    let widths = compute_column_widths(app, &columns, indices, available_width);
+    let now = SystemTime::now();
+    let column_ids: Vec<ColumnId> = columns.iter().map(|col| col.id).collect();
+    let widths = app
+        .column_cache_lookup(available_width, &column_ids, indices.len(), now)
+        .unwrap_or_else(|| {
+            compute_column_widths(app, &columns, indices, available_width)
+        });
+    if app.column_cache_enabled {
+        app.column_cache_store(
+            available_width,
+            column_ids,
+            indices.len(),
+            widths.clone(),
+            now,
+        );
+    }
     let header_cells = columns.iter().zip(widths.iter()).map(|(col, width)| {
         let text = center_text(col.label, *width as usize);
         Cell::from(text).style(
@@ -1121,12 +1135,12 @@ fn center_text(value: &str, width: usize) -> String {
     out
 }
 
-fn select_columns_for_width<'a>(
-    columns: &'a [crate::app::ColumnConfig],
+fn select_columns_for_width(
+    columns: &[crate::app::ColumnConfig],
     available_width: u16,
-) -> Vec<&'a crate::app::ColumnConfig> {
-    let mut cols: Vec<&crate::app::ColumnConfig> =
-        columns.iter().filter(|col| col.visible).collect();
+) -> Vec<crate::app::ColumnConfig> {
+    let mut cols: Vec<crate::app::ColumnConfig> =
+        columns.iter().filter(|col| col.visible).cloned().collect();
     if cols.is_empty() {
         return cols;
     }
@@ -1162,7 +1176,7 @@ fn select_columns_for_width<'a>(
     cols
 }
 
-fn columns_min_width(columns: &[&crate::app::ColumnConfig]) -> u16 {
+fn columns_min_width(columns: &[crate::app::ColumnConfig]) -> u16 {
     let spacing = columns.len().saturating_sub(1) as u16;
     let sum: u16 = columns.iter().map(|c| c.width).sum();
     sum.saturating_add(spacing)
@@ -1170,7 +1184,7 @@ fn columns_min_width(columns: &[&crate::app::ColumnConfig]) -> u16 {
 
 fn compute_column_widths(
     app: &App,
-    columns: &[&crate::app::ColumnConfig],
+    columns: &[crate::app::ColumnConfig],
     indices: &[usize],
     available_width: u16,
 ) -> Vec<u16> {
