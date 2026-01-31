@@ -54,6 +54,10 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
     if app.input_mode == InputMode::Help {
         render_help_menu(f, size, app);
     }
+
+    if app.input_mode == InputMode::Config {
+        render_config_menu(f, size, app);
+    }
 }
 
 fn render_full_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
@@ -742,7 +746,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let mut help = format!(
-        "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  ? help",
+        "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  C config  ? help",
     );
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
@@ -841,6 +845,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("e           Export CSV (visible rows)"),
         Line::from("E           Export JSON (raw feed)"),
         Line::from("? or h      Toggle help"),
+        Line::from("C           Config editor"),
         Line::from("Mouse       Scroll to move • Click row to select"),
         Line::from(""),
         Line::from(Span::styled(
@@ -853,6 +858,76 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title("HELP");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let height = (app.config_items.len() + 6).min(24) as u16;
+    let popup = centered_rect(72, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let key_width = app
+        .config_items
+        .iter()
+        .map(|item| item.key.len())
+        .max()
+        .unwrap_or(8);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("CONFIG {}", app.config_path.display()),
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    for (i, item) in app.config_items.iter().enumerate() {
+        let mut value = item.value.clone();
+        if app.config_editing && i == app.config_cursor {
+            value = format!("{}_", app.config_edit);
+        }
+        let text = format!("{:width$} = {}", item.key, value, width = key_width);
+        let line = if i == app.config_cursor {
+            Line::from(Span::styled(
+                text,
+                Style::default()
+                    .fg(theme.highlight_fg)
+                    .bg(theme.highlight_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(text, Style::default().fg(theme.dim)))
+        };
+        lines.push(line);
+    }
+
+    lines.push(Line::from(""));
+    if let Some((msg, when)) = &app.config_status {
+        if SystemTime::now()
+            .duration_since(*when)
+            .map(|d| d.as_secs() <= 5)
+            .unwrap_or(true)
+        {
+            lines.push(Line::from(Span::styled(
+                msg,
+                Style::default().fg(theme.warn),
+            )));
+        }
+    }
+    lines.push(Line::from(Span::styled(
+        "Up/Down select • Enter edit/apply • w save • Esc close",
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("CONFIG");
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: true })

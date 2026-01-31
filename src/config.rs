@@ -34,6 +34,7 @@ pub struct Config {
     pub url: String,
     pub refresh: Duration,
     pub insecure: bool,
+    pub config_path: PathBuf,
     pub stale_secs: u64,
     pub low_nic: i64,
     pub low_nac: i64,
@@ -124,6 +125,7 @@ pub fn parse_args() -> Result<Config> {
         url: DEFAULT_URL.to_string(),
         refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
         insecure: false,
+        config_path: config_path.clone(),
         stale_secs: DEFAULT_STALE_SECS,
         low_nic: DEFAULT_LOW_NIC,
         low_nac: DEFAULT_LOW_NAC,
@@ -162,6 +164,8 @@ pub fn parse_args() -> Result<Config> {
     } else if explicit_config.is_some() {
         return Err(anyhow!("Config file not found: {}", config_path.display()));
     }
+
+    config.config_path = config_path.clone();
 
     if let Ok(url) = env::var("ADSB_URL") {
         config.url = url;
@@ -643,4 +647,5 @@ fn print_help() {
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | e export csv | E export json");
+    println!("      C config editor");
 }

@@ -1,11 +1,14 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
+use toml::Value;
 
+use crate::config;
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +42,7 @@ pub enum InputMode {
     Filter,
     Columns,
     Help,
+    Config,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +176,21 @@ pub struct Notification {
     pub at: SystemTime,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum ConfigKind {
+    Str,
+    Bool,
+    Int,
+    Float,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConfigItem {
+    pub key: &'static str,
+    pub value: String,
+    pub kind: ConfigKind,
+}
+
 #[derive(Clone, Debug)]
 pub struct RouteInfo {
     pub origin: Option<String>,
@@ -209,6 +228,12 @@ pub struct App {
     pub(crate) input_mode: InputMode,
     pub(crate) layout_mode: LayoutMode,
     pub(crate) theme_mode: ThemeMode,
+    pub(crate) config_path: PathBuf,
+    pub(crate) config_items: Vec<ConfigItem>,
+    pub(crate) config_cursor: usize,
+    pub(crate) config_edit: String,
+    pub(crate) config_editing: bool,
+    pub(crate) config_status: Option<(String, SystemTime)>,
     pub(crate) trail_len: usize,
     pub(crate) site: Option<SiteLocation>,
     pub(crate) columns: Vec<ColumnConfig>,
@@ -261,6 +286,7 @@ impl App {
         filter: String,
         layout_mode: LayoutMode,
         theme_mode: ThemeMode,
+        config_path: PathBuf,
         trail_len: usize,
         favorites_path: Option<PathBuf>,
         site: Option<SiteLocation>,
@@ -309,6 +335,12 @@ impl App {
             input_mode: InputMode::Normal,
             layout_mode,
             theme_mode,
+            config_path,
+            config_items: Vec::new(),
+            config_cursor: 0,
+            config_edit: String::new(),
+            config_editing: false,
+            config_status: None,
             trail_len: trail_len.max(1),
             site,
             columns: default_columns(),
@@ -435,6 +467,102 @@ impl App {
 
     pub fn close_help(&mut self) {
         self.input_mode = InputMode::Normal;
+    }
+
+    pub fn open_config(&mut self) {
+        self.config_items = load_config_items(&self.config_path);
+        self.config_cursor = 0;
+        self.config_editing = false;
+        self.config_edit.clear();
+        self.config_status = None;
+        self.input_mode = InputMode::Config;
+    }
+
+    pub fn close_config(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.config_editing = false;
+        self.config_edit.clear();
+    }
+
+    pub fn next_config_item(&mut self) {
+        if self.config_items.is_empty() {
+            return;
+        }
+        self.config_cursor = (self.config_cursor + 1) % self.config_items.len();
+    }
+
+    pub fn previous_config_item(&mut self) {
+        if self.config_items.is_empty() {
+            return;
+        }
+        if self.config_cursor == 0 {
+            self.config_cursor = self.config_items.len() - 1;
+        } else {
+            self.config_cursor -= 1;
+        }
+    }
+
+    pub fn start_config_edit(&mut self) {
+        if let Some(item) = self.config_items.get(self.config_cursor) {
+            self.config_edit = item.value.clone();
+            self.config_editing = true;
+        }
+    }
+
+    pub fn cancel_config_edit(&mut self) {
+        self.config_editing = false;
+        self.config_edit.clear();
+    }
+
+    pub fn apply_config_edit(&mut self) {
+        if let Some(item) = self.config_items.get_mut(self.config_cursor) {
+            item.value = self.config_edit.trim().to_string();
+        }
+        self.config_editing = false;
+        self.config_edit.clear();
+    }
+
+    pub fn push_config_char(&mut self, ch: char) {
+        self.config_edit.push(ch);
+    }
+
+    pub fn backspace_config(&mut self) {
+        self.config_edit.pop();
+    }
+
+    pub fn save_config(&mut self) {
+        let mut table = toml::value::Table::new();
+        for item in &self.config_items {
+            match parse_config_value(item.kind, item.value.trim()) {
+                Ok(Some(value)) => {
+                    table.insert(item.key.to_string(), value);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    self.config_status = Some((err, SystemTime::now()));
+                    return;
+                }
+            }
+        }
+        let value = Value::Table(table);
+        match toml::to_string_pretty(&value) {
+            Ok(text) => {
+                if let Err(err) = fs::write(&self.config_path, text) {
+                    self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
+                } else {
+                    self.config_status = Some((
+                        format!(
+                            "saved {} (restart to apply)",
+                            self.config_path.display()
+                        ),
+                        SystemTime::now(),
+                    ));
+                }
+            }
+            Err(err) => {
+                self.config_status = Some((format!("serialize failed: {err}"), SystemTime::now()));
+            }
+        }
     }
 
     pub fn next_column(&mut self) {
@@ -1293,4 +1421,162 @@ fn default_columns() -> Vec<ColumnConfig> {
             visible: true,
         },
     ]
+}
+
+fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
+    let file_value = fs::read_to_string(path)
+        .ok()
+        .and_then(|content| toml::from_str::<Value>(&content).ok());
+    let table = file_value.and_then(|value| value.as_table().cloned());
+
+    let mut items = Vec::new();
+    let mut push_item = |key: &'static str, kind: ConfigKind, default: String| {
+        let value = table
+            .as_ref()
+            .and_then(|t| t.get(key))
+            .and_then(toml_value_to_string)
+            .unwrap_or(default);
+        items.push(ConfigItem { key, value, kind });
+    };
+
+    push_item("url", ConfigKind::Str, config::DEFAULT_URL.to_string());
+    push_item(
+        "refresh_secs",
+        ConfigKind::Int,
+        config::DEFAULT_REFRESH_SECS.to_string(),
+    );
+    push_item("insecure", ConfigKind::Bool, "false".to_string());
+    push_item(
+        "stale_secs",
+        ConfigKind::Int,
+        config::DEFAULT_STALE_SECS.to_string(),
+    );
+    push_item("low_nic", ConfigKind::Int, config::DEFAULT_LOW_NIC.to_string());
+    push_item("low_nac", ConfigKind::Int, config::DEFAULT_LOW_NAC.to_string());
+    push_item(
+        "trail_len",
+        ConfigKind::Int,
+        config::DEFAULT_TRAIL_LEN.to_string(),
+    );
+    push_item("layout", ConfigKind::Str, "full".to_string());
+    push_item("theme", ConfigKind::Str, "default".to_string());
+    push_item("site_lat", ConfigKind::Float, "".to_string());
+    push_item("site_lon", ConfigKind::Float, "".to_string());
+    push_item("site_alt_m", ConfigKind::Float, "".to_string());
+    push_item("route_enabled", ConfigKind::Bool, "true".to_string());
+    push_item(
+        "route_base",
+        ConfigKind::Str,
+        config::DEFAULT_ROUTE_BASE.to_string(),
+    );
+    push_item(
+        "route_mode",
+        ConfigKind::Str,
+        config::DEFAULT_ROUTE_MODE.to_string(),
+    );
+    push_item(
+        "route_path",
+        ConfigKind::Str,
+        config::DEFAULT_ROUTE_PATH.to_string(),
+    );
+    push_item(
+        "route_ttl_secs",
+        ConfigKind::Int,
+        config::DEFAULT_ROUTE_TTL_SECS.to_string(),
+    );
+    push_item(
+        "route_refresh_secs",
+        ConfigKind::Int,
+        config::DEFAULT_ROUTE_REFRESH_SECS.to_string(),
+    );
+    push_item(
+        "route_batch",
+        ConfigKind::Int,
+        config::DEFAULT_ROUTE_BATCH.to_string(),
+    );
+    push_item(
+        "route_timeout_secs",
+        ConfigKind::Int,
+        config::DEFAULT_ROUTE_TIMEOUT_SECS.to_string(),
+    );
+    push_item(
+        "ui_fps",
+        ConfigKind::Int,
+        config::DEFAULT_UI_FPS.to_string(),
+    );
+    push_item(
+        "smooth_mode",
+        ConfigKind::Bool,
+        config::DEFAULT_SMOOTH_MODE.to_string(),
+    );
+    push_item(
+        "smooth_merge",
+        ConfigKind::Bool,
+        config::DEFAULT_SMOOTH_MERGE.to_string(),
+    );
+    push_item(
+        "rate_window_ms",
+        ConfigKind::Int,
+        config::DEFAULT_RATE_WINDOW_MS.to_string(),
+    );
+    push_item(
+        "rate_min_secs",
+        ConfigKind::Float,
+        config::DEFAULT_RATE_MIN_SECS.to_string(),
+    );
+    push_item(
+        "notify_radius_mi",
+        ConfigKind::Float,
+        config::DEFAULT_NOTIFY_RADIUS_MI.to_string(),
+    );
+    push_item(
+        "overpass_mi",
+        ConfigKind::Float,
+        config::DEFAULT_OVERPASS_MI.to_string(),
+    );
+    push_item(
+        "notify_cooldown_secs",
+        ConfigKind::Int,
+        config::DEFAULT_NOTIFY_COOLDOWN_SECS.to_string(),
+    );
+
+    items
+}
+
+fn toml_value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.to_string()),
+        Value::Integer(i) => Some(i.to_string()),
+        Value::Float(f) => Some(format!("{f}")),
+        Value::Boolean(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, String> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    match kind {
+        ConfigKind::Str => Ok(Some(Value::String(text.to_string()))),
+        ConfigKind::Bool => {
+            let lowered = text.to_ascii_lowercase();
+            if matches!(lowered.as_str(), "1" | "true" | "yes" | "on") {
+                Ok(Some(Value::Boolean(true)))
+            } else if matches!(lowered.as_str(), "0" | "false" | "no" | "off") {
+                Ok(Some(Value::Boolean(false)))
+            } else {
+                Err(format!("invalid bool: {text}"))
+            }
+        }
+        ConfigKind::Int => match text.parse::<i64>() {
+            Ok(value) => Ok(Some(Value::Integer(value))),
+            Err(_) => Err(format!("invalid int for {}", text)),
+        },
+        ConfigKind::Float => match text.parse::<f64>() {
+            Ok(value) => Ok(Some(Value::Float(value))),
+            Err(_) => Err(format!("invalid float for {}", text)),
+        },
+    }
 }

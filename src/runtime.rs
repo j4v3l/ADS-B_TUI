@@ -117,6 +117,7 @@ pub fn run_app(
                         KeyCode::Char('t') => app.toggle_theme(),
                         KeyCode::Char('l') => app.toggle_layout(),
                         KeyCode::Char('m') => app.open_columns(),
+                        KeyCode::Char('C') => app.open_config(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
                         KeyCode::Char('e') => {
                             if let Ok(path) = export::export_csv(&app, &indices) {
@@ -153,6 +154,52 @@ pub fn run_app(
                     InputMode::Help => match key.code {
                         KeyCode::Esc => app.close_help(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.close_help(),
+                        _ => {}
+                    },
+                    InputMode::Config => match key.code {
+                        KeyCode::Esc => {
+                            if app.config_editing {
+                                app.cancel_config_edit();
+                            } else {
+                                app.close_config();
+                            }
+                        }
+                        KeyCode::Char('w') | KeyCode::Char('S') => app.save_config(),
+                        KeyCode::Up => {
+                            if !app.config_editing {
+                                app.previous_config_item();
+                            }
+                        }
+                        KeyCode::Down => {
+                            if !app.config_editing {
+                                app.next_config_item();
+                            }
+                        }
+                        KeyCode::Enter => {
+                            if app.config_editing {
+                                app.apply_config_edit();
+                            } else {
+                                app.start_config_edit();
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if app.config_editing {
+                                app.backspace_config();
+                            }
+                        }
+                        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if ch == 'u' && app.config_editing {
+                                app.config_edit.clear();
+                            }
+                            if ch == 's' {
+                                app.save_config();
+                            }
+                        }
+                        KeyCode::Char(ch) => {
+                            if app.config_editing {
+                                app.push_config_char(ch);
+                            }
+                        }
                         _ => {}
                     },
                 },
