@@ -586,15 +586,17 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .map(|width| Constraint::Length(*width))
         .collect();
 
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .title("AIRSPACE")
+        .style(Style::default().bg(theme.panel_bg));
+
     let table = Table::new(rows, constraints)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
-                .title("AIRSPACE"),
-        )
+        .block(block)
         .column_spacing(1)
+        .style(Style::default().bg(theme.panel_bg))
         .highlight_style(
             Style::default()
                 .fg(theme.highlight_fg)
