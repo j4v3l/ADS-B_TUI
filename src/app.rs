@@ -1477,6 +1477,12 @@ fn fill_copy<T: Copy>(target: &mut Option<T>, source: Option<T>) {
 fn default_columns() -> Vec<ColumnConfig> {
     vec![
         ColumnConfig {
+            id: ColumnId::Flag,
+            label: "FLAG",
+            width: 2,
+            visible: true,
+        },
+        ColumnConfig {
             id: ColumnId::Fav,
             label: "*",
             width: 1,
@@ -1564,12 +1570,6 @@ fn default_columns() -> Vec<ColumnConfig> {
             id: ColumnId::Hex,
             label: "HEX",
             width: 6,
-            visible: true,
-        },
-        ColumnConfig {
-            id: ColumnId::Flag,
-            label: "FLAG",
-            width: 2,
             visible: true,
         },
     ]
