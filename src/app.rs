@@ -291,6 +291,7 @@ pub struct App {
     pub(crate) radar_range_nm: f64,
     pub(crate) radar_aspect: f64,
     pub(crate) radar_renderer: RadarRenderer,
+    pub(crate) radar_labels: bool,
     pub(crate) columns: Vec<ColumnConfig>,
     pub(crate) column_cursor: usize,
     pub(crate) smooth_mode: bool,
@@ -362,6 +363,7 @@ impl App {
         radar_range_nm: f64,
         radar_aspect: f64,
         radar_renderer: RadarRenderer,
+        radar_labels: bool,
         route_enabled: bool,
         route_tar1090: bool,
         route_ttl: Duration,
@@ -437,6 +439,7 @@ impl App {
             radar_range_nm: radar_range_nm.max(1.0),
             radar_aspect: radar_aspect.max(0.2),
             radar_renderer,
+            radar_labels,
             columns: {
                 let mut cols = default_columns();
                 if let Some(flag_col) = cols.iter_mut().find(|c| c.id == ColumnId::Flag) {
@@ -585,6 +588,11 @@ impl App {
             self.layout_mode = layout_mode;
             debug!("layout -> {}", self.layout_mode.label());
         }
+    }
+
+    pub fn toggle_radar_labels(&mut self) {
+        self.radar_labels = !self.radar_labels;
+        debug!("radar labels -> {}", if self.radar_labels { "on" } else { "off" });
     }
 
     pub fn open_columns(&mut self) {
@@ -2258,6 +2266,11 @@ fn default_config_items() -> Vec<ConfigItem> {
         ConfigKind::Str,
         config::DEFAULT_RADAR_RENDERER.to_string(),
     );
+    push_item(
+        "radar_labels",
+        ConfigKind::Bool,
+        config::DEFAULT_RADAR_LABELS.to_string(),
+    );
     push_item("site_lat", ConfigKind::Float, "".to_string());
     push_item("site_lon", ConfigKind::Float, "".to_string());
     push_item("site_alt_m", ConfigKind::Float, "".to_string());
@@ -2592,6 +2605,7 @@ mod tests {
             200.0,
             1.0,
             crate::app::RadarRenderer::Canvas,
+            false,
             false,
             false,
             Duration::from_secs(1),
