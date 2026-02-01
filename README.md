@@ -20,6 +20,7 @@ A modern, fast, and user-friendly terminal interface for tracking aircraft using
 - **Flight routes** - Origin/destination information
 - **Customizable columns** - Show/hide columns as needed
 - **Favorites system** - Mark and track specific aircraft
+- **Radar view** - Full-screen radar with sweep and optional labels
 - **Export functionality** - Save data to CSV/JSON
 - **Cross-platform** - Works on Windows, macOS, and Linux
 
@@ -89,6 +90,12 @@ low_nac = 8
 # Trail length for aircraft tracks
 trail_len = 6
 
+# Radar layout options
+layout = "full" # full, compact, radar
+radar_range_nm = 200.0
+radar_renderer = "canvas"
+radar_labels = false
+
 # Enable country flags
 flags_enabled = true
 
@@ -110,6 +117,12 @@ smooth_mode = true
 | `low_nic` | Minimum NIC value to display | 5 |
 | `low_nac` | Minimum NACp value to display | 8 |
 | `trail_len` | Aircraft trail length | 6 |
+| `layout` | UI layout mode ("full", "compact", "radar") | "full" |
+| `theme` | Color theme | "default" |
+| `radar_range_nm` | Radar max range in nautical miles | 200.0 |
+| `radar_aspect` | Radar Y-axis scale factor | 1.0 |
+| `radar_renderer` | Radar renderer ("canvas", "ascii") | "canvas" |
+| `radar_labels` | Show labels above radar blips (full radar layout) | false |
 | `flags_enabled` | Show country flags | true |
 | `ui_fps` | UI refresh rate | 60 |
 | `smooth_mode` | Enable smooth scrolling | true |
@@ -122,10 +135,18 @@ smooth_mode = true
 | Key | Action |
 |-----|--------|
 | `↑/↓` | Navigate aircraft list |
-| `←/→` | Scroll table horizontally |
-| `f` | Toggle favorite for selected aircraft |
-| `c` | Toggle column visibility |
-| `e` | Export current data |
+| `s` | Toggle sort |
+| `/` | Filter |
+| `c` | Clear filter |
+| `f` | Toggle favorite |
+| `l` | Cycle layout (full/compact/radar) |
+| `R` | Jump to radar layout |
+| `b` | Toggle radar labels |
+| `m` | Columns menu |
+| `w` | Watchlist |
+| `t` | Toggle theme |
+| `e` / `E` | Export CSV / JSON |
+| `C` | Config editor |
 | `q` | Quit application |
 | `?` | Show help |
 
