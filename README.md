@@ -141,7 +141,7 @@ smooth_mode = true
 | `/` | Filter |
 | `c` | Clear filter |
 | `f` | Toggle favorite |
-| `l` | Cycle layout (full/compact/radar) |
+| `l` | Cycle layout (full/compact) |
 | `R` | Jump to radar layout |
 | `b` | Toggle radar labels |
 | `m` | Columns menu |
