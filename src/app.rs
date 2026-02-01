@@ -91,13 +91,6 @@ pub enum RadarRenderer {
 }
 
 impl RadarRenderer {
-    pub fn label(self) -> &'static str {
-        match self {
-            RadarRenderer::Canvas => "CANVAS",
-            RadarRenderer::Ascii => "ASCII",
-        }
-    }
-
     pub fn from_str(value: &str) -> Self {
         match value.to_ascii_lowercase().as_str() {
             "ascii" => RadarRenderer::Ascii,
