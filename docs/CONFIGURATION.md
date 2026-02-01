@@ -85,7 +85,7 @@ insecure = false
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `layout` | string | "full" | UI layout mode ("full", "compact", "radar") |
-| `theme` | string | "default" | Color theme |
+| `theme` | string | "default" | Color theme ("default", "color", "amber", "ocean", "matrix", "mono") |
 
 ### Performance Settings
 

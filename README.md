@@ -121,7 +121,7 @@ smooth_mode = true
 | `low_nac` | Minimum NACp value to display | 8 |
 | `trail_len` | Aircraft trail length | 6 |
 | `layout` | UI layout mode ("full", "compact", "radar") | "full" |
-| `theme` | Color theme | "default" |
+| `theme` | Color theme ("default", "color", "amber", "ocean", "matrix", "mono") | "default" |
 | `radar_range_nm` | Radar max range in nautical miles | 200.0 |
 | `radar_aspect` | Radar Y-axis scale factor | 1.0 |
 | `radar_renderer` | Radar renderer ("canvas", "ascii") | "canvas" |

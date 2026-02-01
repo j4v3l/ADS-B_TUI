@@ -2127,6 +2127,20 @@ fn theme(mode: ThemeMode) -> Theme {
             header_bg: Color::Rgb(0, 22, 0),
             panel_bg: Color::Rgb(0, 16, 0),
         },
+        ThemeMode::Monochrome => Theme {
+            accent: Color::White,
+            warn: Color::White,
+            danger: Color::White,
+            dim: Color::Gray,
+            highlight_fg: Color::Black,
+            highlight_bg: Color::White,
+            fav: Color::White,
+            watch: Color::White,
+            row_even_bg: Color::Rgb(10, 10, 10),
+            row_odd_bg: Color::Rgb(4, 4, 4),
+            header_bg: Color::Rgb(20, 20, 20),
+            panel_bg: Color::Rgb(8, 8, 8),
+        },
     }
 }
 
