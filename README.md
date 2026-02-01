@@ -74,6 +74,7 @@ insecure = false
 
 # Data staleness threshold in seconds
 stale_secs = 60
+hide_stale = false
 
 # Enable logging
 log_enabled = true
@@ -115,6 +116,7 @@ smooth_mode = true
 | `refresh_secs` | Data refresh interval (0 = fetch once) | 0 |
 | `insecure` | Allow self-signed certificates | false |
 | `stale_secs` | Mark data as stale after this many seconds | 60 |
+| `hide_stale` | Hide stale aircraft from the table | false |
 | `low_nic` | Minimum NIC value to display | 5 |
 | `low_nac` | Minimum NACp value to display | 8 |
 | `trail_len` | Aircraft trail length | 6 |

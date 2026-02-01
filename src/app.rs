@@ -281,6 +281,7 @@ pub struct App {
     pub(crate) tick: u64,
     pub(crate) start_time: SystemTime,
     pub(crate) stale_secs: f64,
+    pub(crate) hide_stale: bool,
     pub(crate) low_nic: i64,
     pub(crate) low_nac: i64,
     pub(crate) favorites: HashSet<String>,
@@ -366,6 +367,7 @@ impl App {
         url: String,
         refresh: Duration,
         stale_secs: f64,
+        hide_stale: bool,
         low_nic: i64,
         low_nac: i64,
         favorites: HashSet<String>,
@@ -427,6 +429,7 @@ impl App {
             tick: 0,
             start_time: SystemTime::now(),
             stale_secs,
+            hide_stale,
             low_nic,
             low_nac,
             favorites,
@@ -1035,6 +1038,12 @@ impl App {
         if let Some(key) = &self.selection_key {
             if let Some(pos) = indices.iter().position(|idx| {
                 if let Some(ac) = self.data.aircraft.get(*idx) {
+                    let stale = seen_seconds(ac)
+                        .map(|s| s > self.stale_secs)
+                        .unwrap_or(false);
+                    if stale {
+                        return false;
+                    }
                     if let Some(hex) = ac.hex.as_deref() {
                         if normalize_hex(hex) == *key {
                             return true;
@@ -1049,6 +1058,8 @@ impl App {
                 false
             }) {
                 self.table_state.select(Some(pos));
+            } else {
+                self.selection_key = None;
             }
         }
     }
@@ -1075,7 +1086,17 @@ impl App {
             .aircraft
             .iter()
             .enumerate()
-            .filter(|(_, ac)| self.matches_filter(ac))
+            .filter(|(_, ac)| {
+                if self.hide_stale {
+                    let stale = seen_seconds(ac)
+                        .map(|s| s > self.stale_secs)
+                        .unwrap_or(false);
+                    if stale {
+                        return false;
+                    }
+                }
+                self.matches_filter(ac)
+            })
             .map(|(i, _)| i)
             .collect();
 
@@ -2245,6 +2266,11 @@ fn default_config_items() -> Vec<ConfigItem> {
         config::DEFAULT_TRAIL_LEN.to_string(),
     );
     push_item(
+        "hide_stale",
+        ConfigKind::Bool,
+        config::DEFAULT_HIDE_STALE.to_string(),
+    );
+    push_item(
         "favorites_file",
         ConfigKind::Str,
         config::DEFAULT_FAVORITES_FILE.to_string(),
@@ -2615,6 +2641,7 @@ mod tests {
             "http://example".to_string(),
             Duration::from_secs(1),
             60.0,
+            false,
             5,
             8,
             HashSet::new(),

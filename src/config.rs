@@ -8,6 +8,7 @@ use std::time::Duration;
 pub const DEFAULT_URL: &str = "http://adsb.local/data/aircraft.json";
 pub const DEFAULT_REFRESH_SECS: u64 = 2;
 pub const DEFAULT_STALE_SECS: u64 = 60;
+pub const DEFAULT_HIDE_STALE: bool = false;
 pub const DEFAULT_LOW_NIC: i64 = 5;
 pub const DEFAULT_LOW_NAC: i64 = 8;
 pub const DEFAULT_TRAIL_LEN: u64 = 6;
@@ -50,6 +51,7 @@ pub struct Config {
     pub insecure: bool,
     pub config_path: PathBuf,
     pub stale_secs: u64,
+    pub hide_stale: bool,
     pub low_nic: i64,
     pub low_nac: i64,
     pub trail_len: u64,
@@ -104,6 +106,7 @@ struct FileConfig {
     refresh_secs: Option<u64>,
     insecure: Option<bool>,
     stale_secs: Option<u64>,
+    hide_stale: Option<bool>,
     low_nic: Option<i64>,
     low_nac: Option<i64>,
     trail_len: Option<u64>,
@@ -177,6 +180,7 @@ pub fn parse_args() -> Result<Config> {
         insecure: false,
         config_path: config_path.clone(),
         stale_secs: DEFAULT_STALE_SECS,
+        hide_stale: DEFAULT_HIDE_STALE,
         low_nic: DEFAULT_LOW_NIC,
         low_nac: DEFAULT_LOW_NAC,
         trail_len: DEFAULT_TRAIL_LEN,
@@ -250,6 +254,9 @@ pub fn parse_args() -> Result<Config> {
         if let Ok(secs) = value.parse::<u64>() {
             config.stale_secs = secs.max(1);
         }
+    }
+    if let Ok(value) = env::var("ADSB_HIDE_STALE") {
+        config.hide_stale = matches!(value.as_str(), "1" | "true" | "yes" | "on");
     }
     if let Ok(value) = env::var("ADSB_LOW_NIC") {
         if let Ok(val) = value.parse::<i64>() {
@@ -455,6 +462,12 @@ pub fn parse_args() -> Result<Config> {
                     .ok_or_else(|| anyhow!("--stale needs a value"))?;
                 let secs: u64 = value.parse()?;
                 config.stale_secs = secs.max(1);
+            }
+            "--hide-stale" => {
+                config.hide_stale = true;
+            }
+            "--show-stale" => {
+                config.hide_stale = false;
             }
             "--low-nic" => {
                 let value = iter
@@ -763,6 +776,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(stale_secs) = file.stale_secs {
         target.stale_secs = stale_secs.max(1);
     }
+    if let Some(hide_stale) = file.hide_stale {
+        target.hide_stale = hide_stale;
+    }
     if let Some(low_nic) = file.low_nic {
         target.low_nic = low_nic;
     }
@@ -912,7 +928,7 @@ fn print_help() {
     println!("       [--api-key KEY] [--api-key-header NAME]");
     println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
     println!("       [--log] [--no-log] [--log-level LEVEL] [--log-file PATH]");
-    println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
+    println!("       [--stale SECONDS] [--hide-stale] [--show-stale] [--low-nic N] [--low-nac N]");
     println!(
         "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix]"
     );
@@ -934,6 +950,7 @@ fn print_help() {
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
     println!("Environment: ADSB_CONFIG overrides config path");
     println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
+    println!("Environment: ADSB_HIDE_STALE filters stale aircraft from the table");
     println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
     println!("Environment: ADSB_API_KEY/ADSB_API_KEY_HEADER configure API auth header");
     println!("Environment: ADSB_WATCHLIST_ENABLED/FILE configure watchlist loading");
@@ -979,6 +996,7 @@ mod tests {
             insecure: false,
             config_path: PathBuf::from("adsb-tui.toml"),
             stale_secs: DEFAULT_STALE_SECS,
+            hide_stale: DEFAULT_HIDE_STALE,
             low_nic: DEFAULT_LOW_NIC,
             low_nac: DEFAULT_LOW_NAC,
             trail_len: DEFAULT_TRAIL_LEN,
@@ -1041,6 +1059,7 @@ log_level = "debug"
 log_file = "adsb-tui.log"
 watchlist_enabled = false
 watchlist_file = "custom-watch.toml"
+hide_stale = true
 radar_range_nm = 250.0
 radar_aspect = 1.2
 radar_renderer = "ascii"
@@ -1058,6 +1077,7 @@ radar_blip = "block"
         assert_eq!(cfg.log_file.as_deref(), Some("adsb-tui.log"));
         assert_eq!(cfg.watchlist_enabled, Some(false));
         assert_eq!(cfg.watchlist_file.as_deref(), Some("custom-watch.toml"));
+        assert_eq!(cfg.hide_stale, Some(true));
         assert_eq!(cfg.radar_range_nm, Some(250.0));
         assert_eq!(cfg.radar_aspect, Some(1.2));
         assert_eq!(cfg.radar_renderer.as_deref(), Some("ascii"));
@@ -1081,6 +1101,7 @@ radar_blip = "block"
             log_file: Some("trace.log".to_string()),
             watchlist_enabled: Some(false),
             watchlist_file: Some("wl.toml".to_string()),
+            hide_stale: Some(true),
             radar_range_nm: Some(300.0),
             radar_aspect: Some(0.1),
             radar_renderer: Some("ascii".to_string()),
@@ -1099,6 +1120,7 @@ radar_blip = "block"
         assert_eq!(cfg.log_file, "trace.log");
         assert!(!cfg.watchlist_enabled);
         assert_eq!(cfg.watchlist_file, "wl.toml");
+        assert!(cfg.hide_stale);
         assert_eq!(cfg.radar_range_nm, 300.0);
         assert_eq!(cfg.radar_aspect, 0.2);
         assert_eq!(cfg.radar_renderer, "ascii");

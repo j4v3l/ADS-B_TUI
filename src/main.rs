@@ -128,6 +128,7 @@ fn main() -> Result<()> {
             config.url,
             config.refresh,
             config.stale_secs as f64,
+            config.hide_stale,
             config.low_nic,
             config.low_nac,
             favorites,
