@@ -142,3 +142,79 @@ where
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{seen_seconds, ApiResponse};
+
+    const MOCK: &str = r#"{
+        "now": 1769903354,
+        "messages": 5262546,
+        "aircraft": [
+            {
+                "hex": "ac6668",
+                "type": "adsb_icao",
+                "flight": "SWA3576 ",
+                "r": "N8987Q",
+                "t": "B38M",
+                "desc": "BOEING 737 MAX 8",
+                "ownOp": "SOUTHWEST AIRLINES CO",
+                "alt_baro": 22925,
+                "alt_geom": 23200,
+                "gs": 347.7,
+                "track": 339.64,
+                "baro_rate": -1024,
+                "category": "A3",
+                "nav_qnh": 1013.6,
+                "nav_altitude_mcp": 19008,
+                "lat": 26.853891,
+                "lon": -80.544627,
+                "nic": 8,
+                "rc": 186,
+                "seen_pos": 4.355,
+                "version": 2,
+                "nic_baro": 1,
+                "nac_p": 10,
+                "nac_v": 2,
+                "sil": 3,
+                "sil_type": "perhour",
+                "alert": 0,
+                "spi": 0,
+                "mlat": [],
+                "tisb": [],
+                "messages": 4669,
+                "seen": 4.4,
+                "rssi": -3.7
+            },
+            { "hex": "a716f6" },
+            { "hex": "a54118" },
+            { "hex": "e80444" },
+            { "hex": "ac0048" },
+            { "hex": "acf5be" }
+        ]
+    }"#;
+
+    #[test]
+    fn parse_mock_data() {
+        let data: ApiResponse = serde_json::from_str(MOCK).unwrap();
+        assert_eq!(data.now, Some(1769903354));
+        assert_eq!(data.messages, Some(5262546));
+        assert_eq!(data.aircraft.len(), 6);
+
+        let first = &data.aircraft[0];
+        assert_eq!(first.hex.as_deref(), Some("ac6668"));
+        assert_eq!(first.own_op.as_deref(), Some("SOUTHWEST AIRLINES CO"));
+        assert_eq!(first.baro_rate, Some(-1024));
+        assert_eq!(seen_seconds(first), Some(4.355));
+    }
+
+    #[test]
+    fn parse_numeric_fallbacks() {
+        let data: ApiResponse = serde_json::from_str(
+            r#"{"now": 123.9, "messages": "42", "aircraft": []}"#,
+        )
+        .unwrap();
+        assert_eq!(data.now, Some(123));
+        assert_eq!(data.messages, Some(42));
+    }
+}

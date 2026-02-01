@@ -14,6 +14,7 @@ pub const DEFAULT_TRAIL_LEN: u64 = 6;
 pub const DEFAULT_FAVORITES_FILE: &str = "adsb-favorites.txt";
 pub const DEFAULT_WATCHLIST_FILE: &str = "adsb-watchlist.toml";
 pub const DEFAULT_WATCHLIST_ENABLED: bool = true;
+pub const DEFAULT_API_KEY_HEADER: &str = "api-auth";
 pub const DEFAULT_ROUTE_BASE: &str = "https://api.adsb.lol";
 pub const DEFAULT_ROUTE_TTL_SECS: u64 = 3600;
 pub const DEFAULT_ROUTE_REFRESH_SECS: u64 = 15;
@@ -51,6 +52,8 @@ pub struct Config {
     pub favorites_file: String,
     pub watchlist_enabled: bool,
     pub watchlist_file: String,
+    pub api_key: String,
+    pub api_key_header: String,
     pub filter: String,
     pub layout: String,
     pub theme: String,
@@ -95,6 +98,8 @@ struct FileConfig {
     favorites_file: Option<String>,
     watchlist_enabled: Option<bool>,
     watchlist_file: Option<String>,
+    api_key: Option<String>,
+    api_key_header: Option<String>,
     filter: Option<String>,
     layout: Option<String>,
     theme: Option<String>,
@@ -158,6 +163,8 @@ pub fn parse_args() -> Result<Config> {
         favorites_file: DEFAULT_FAVORITES_FILE.to_string(),
         watchlist_enabled: DEFAULT_WATCHLIST_ENABLED,
         watchlist_file: DEFAULT_WATCHLIST_FILE.to_string(),
+        api_key: String::new(),
+        api_key_header: DEFAULT_API_KEY_HEADER.to_string(),
         filter: String::new(),
         layout: "full".to_string(),
         theme: "default".to_string(),
@@ -242,6 +249,12 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_FAVORITES_FILE") {
         config.favorites_file = value;
+    }
+    if let Ok(value) = env::var("ADSB_API_KEY") {
+        config.api_key = value;
+    }
+    if let Ok(value) = env::var("ADSB_API_KEY_HEADER") {
+        config.api_key_header = value;
     }
     if let Ok(value) = env::var("ADSB_WATCHLIST_ENABLED") {
         config.watchlist_enabled = matches!(value.as_str(), "1" | "true" | "yes" | "on");
@@ -422,6 +435,18 @@ pub fn parse_args() -> Result<Config> {
                 config.favorites_file = iter
                     .next()
                     .ok_or_else(|| anyhow!("--favorites-file needs a value"))?
+                    .to_string();
+            }
+            "--api-key" => {
+                config.api_key = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--api-key needs a value"))?
+                    .to_string();
+            }
+            "--api-key-header" => {
+                config.api_key_header = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--api-key-header needs a value"))?
                     .to_string();
             }
             "--watchlist-file" => {
@@ -648,6 +673,12 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(favorites_file) = file.favorites_file {
         target.favorites_file = favorites_file;
     }
+    if let Some(api_key) = file.api_key {
+        target.api_key = api_key;
+    }
+    if let Some(api_key_header) = file.api_key_header {
+        target.api_key_header = api_key_header;
+    }
     if let Some(watchlist_enabled) = file.watchlist_enabled {
         target.watchlist_enabled = watchlist_enabled;
     }
@@ -749,6 +780,7 @@ fn print_help() {
     println!(
         "       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]"
     );
+    println!("       [--api-key KEY] [--api-key-header NAME]");
     println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
     println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
     println!(
@@ -770,6 +802,7 @@ fn print_help() {
     println!("Environment: ADSB_CONFIG overrides config path");
     println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
     println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
+    println!("Environment: ADSB_API_KEY/ADSB_API_KEY_HEADER configure API auth header");
     println!("Environment: ADSB_WATCHLIST_ENABLED/FILE configure watchlist loading");
     println!("Environment: ADSB_SITE_LAT/LON/ALT_M set receiver location");
     println!("Environment: ADSB_ROUTE_* configure route lookups");
@@ -783,4 +816,117 @@ fn print_help() {
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | e export csv | E export json");
     println!("      C config editor");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        dir.push(format!("adsb-tui-config-test-{suffix}"));
+        let _ = fs::create_dir_all(&dir);
+        dir.push(name);
+        dir
+    }
+
+    fn base_config() -> Config {
+        Config {
+            url: DEFAULT_URL.to_string(),
+            refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
+            insecure: false,
+            config_path: PathBuf::from("adsb-tui.toml"),
+            stale_secs: DEFAULT_STALE_SECS,
+            low_nic: DEFAULT_LOW_NIC,
+            low_nac: DEFAULT_LOW_NAC,
+            trail_len: DEFAULT_TRAIL_LEN,
+            favorites: Vec::new(),
+            favorites_file: DEFAULT_FAVORITES_FILE.to_string(),
+            watchlist_enabled: DEFAULT_WATCHLIST_ENABLED,
+            watchlist_file: DEFAULT_WATCHLIST_FILE.to_string(),
+            api_key: String::new(),
+            api_key_header: DEFAULT_API_KEY_HEADER.to_string(),
+            filter: String::new(),
+            layout: "full".to_string(),
+            theme: "default".to_string(),
+            site_lat: None,
+            site_lon: None,
+            site_alt_m: None,
+            route_enabled: true,
+            route_base: DEFAULT_ROUTE_BASE.to_string(),
+            route_ttl_secs: DEFAULT_ROUTE_TTL_SECS,
+            route_refresh_secs: DEFAULT_ROUTE_REFRESH_SECS,
+            route_batch: DEFAULT_ROUTE_BATCH,
+            route_timeout_secs: DEFAULT_ROUTE_TIMEOUT_SECS,
+            route_mode: DEFAULT_ROUTE_MODE.to_string(),
+            route_path: DEFAULT_ROUTE_PATH.to_string(),
+            ui_fps: DEFAULT_UI_FPS,
+            smooth_mode: DEFAULT_SMOOTH_MODE,
+            smooth_merge: DEFAULT_SMOOTH_MERGE,
+            rate_window_ms: DEFAULT_RATE_WINDOW_MS,
+            rate_min_secs: DEFAULT_RATE_MIN_SECS,
+            notify_radius_mi: DEFAULT_NOTIFY_RADIUS_MI,
+            overpass_mi: DEFAULT_OVERPASS_MI,
+            notify_cooldown_secs: DEFAULT_NOTIFY_COOLDOWN_SECS,
+            altitude_trend_arrows: DEFAULT_ALTITUDE_TREND_ARROWS,
+            column_cache: DEFAULT_COLUMN_CACHE,
+            track_arrows: DEFAULT_TRACK_ARROWS,
+            flags_enabled: DEFAULT_FLAGS_ENABLED,
+            stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
+            stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
+            stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
+        }
+    }
+
+    #[test]
+    fn load_file_config_parses_values() {
+        let path = temp_file("config.toml");
+        let content = r#"
+url = "http://example.test/data.json"
+refresh_secs = 3
+api_key = "abc123"
+api_key_header = "api-auth"
+watchlist_enabled = false
+watchlist_file = "custom-watch.toml"
+"#;
+        fs::write(&path, content).unwrap();
+        let cfg = load_file_config(&path).unwrap().unwrap();
+        assert_eq!(cfg.url.as_deref(), Some("http://example.test/data.json"));
+        assert_eq!(cfg.refresh_secs, Some(3));
+        assert_eq!(cfg.api_key.as_deref(), Some("abc123"));
+        assert_eq!(cfg.api_key_header.as_deref(), Some("api-auth"));
+        assert_eq!(cfg.watchlist_enabled, Some(false));
+        assert_eq!(cfg.watchlist_file.as_deref(), Some("custom-watch.toml"));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(path.parent().unwrap());
+    }
+
+    #[test]
+    fn apply_file_config_overrides_and_clamps() {
+        let mut cfg = base_config();
+        let file = FileConfig {
+            route_batch: Some(0),
+            rate_window_ms: Some(10),
+            notify_cooldown_secs: Some(2),
+            api_key: Some("key".to_string()),
+            api_key_header: Some("x-api-key".to_string()),
+            watchlist_enabled: Some(false),
+            watchlist_file: Some("wl.toml".to_string()),
+            ..Default::default()
+        };
+        apply_file_config(&mut cfg, file);
+        assert_eq!(cfg.route_batch, 1);
+        assert_eq!(cfg.rate_window_ms, 50);
+        assert_eq!(cfg.notify_cooldown_secs, 10);
+        assert_eq!(cfg.api_key, "key");
+        assert_eq!(cfg.api_key_header, "x-api-key");
+        assert!(!cfg.watchlist_enabled);
+        assert_eq!(cfg.watchlist_file, "wl.toml");
+    }
 }

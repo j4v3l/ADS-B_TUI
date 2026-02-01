@@ -1968,6 +1968,12 @@ fn default_config_items() -> Vec<ConfigItem> {
         ConfigKind::Str,
         config::DEFAULT_FAVORITES_FILE.to_string(),
     );
+    push_item("api_key", ConfigKind::Str, "".to_string());
+    push_item(
+        "api_key_header",
+        ConfigKind::Str,
+        config::DEFAULT_API_KEY_HEADER.to_string(),
+    );
     push_item(
         "watchlist_enabled",
         ConfigKind::Bool,
@@ -2163,5 +2169,213 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
         Value::Float(f) => Some(toml_edit::Value::from(f)),
         Value::Boolean(b) => Some(toml_edit::Value::from(b)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches, App,
+        ConfigKind, RouteInfo, TrendDir, WatchEntry,
+    };
+    use crate::model::Aircraft;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    fn sample_aircraft() -> Aircraft {
+        Aircraft {
+            hex: Some("ac6668".to_string()),
+            flight: Some("SWA3576 ".to_string()),
+            r: Some("N8987Q".to_string()),
+            t: Some("B38M".to_string()),
+            own_op: Some("SOUTHWEST AIRLINES CO".to_string()),
+            category: Some("A3".to_string()),
+            ..Aircraft::default()
+        }
+    }
+
+    #[test]
+    fn watch_entry_matching_modes() {
+        let ac = sample_aircraft();
+        let route = RouteInfo {
+            origin: Some("KJFK".to_string()),
+            destination: Some("KMIA".to_string()),
+            route: None,
+            fetched_at: SystemTime::now(),
+        };
+
+        let entry = WatchEntry {
+            id: None,
+            label: None,
+            match_type: "hex".to_string(),
+            value: "AC6668".to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: None,
+            mode: Some("exact".to_string()),
+            color: None,
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "callsign".to_string(),
+            value: "SWA".to_string(),
+            mode: Some("prefix".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "reg".to_string(),
+            value: "8987".to_string(),
+            mode: Some("contains".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "type".to_string(),
+            value: "B38M".to_string(),
+            mode: Some("exact".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "owner".to_string(),
+            value: "SOUTHWEST".to_string(),
+            mode: Some("contains".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "category".to_string(),
+            value: "A3".to_string(),
+            mode: Some("exact".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, None));
+
+        let entry = WatchEntry {
+            match_type: "route".to_string(),
+            value: "KJFK-KMIA".to_string(),
+            mode: Some("exact".to_string()),
+            ..entry.clone()
+        };
+        assert!(watch_entry_matches(&entry, &ac, Some(&route)));
+
+        let entry = WatchEntry {
+            match_type: "unknown".to_string(),
+            value: "X".to_string(),
+            mode: Some("exact".to_string()),
+            ..entry.clone()
+        };
+        assert!(!watch_entry_matches(&entry, &ac, None));
+    }
+
+    #[test]
+    fn watchlist_priority_pick() {
+        let watchlist = vec![
+            WatchEntry {
+                id: Some("low".to_string()),
+                label: None,
+                match_type: "hex".to_string(),
+                value: "ac6668".to_string(),
+                enabled: Some(true),
+                notify: Some(true),
+                priority: Some(1),
+                mode: Some("exact".to_string()),
+                color: None,
+            },
+            WatchEntry {
+                id: Some("high".to_string()),
+                label: None,
+                match_type: "hex".to_string(),
+                value: "ac6668".to_string(),
+                enabled: Some(true),
+                notify: Some(true),
+                priority: Some(5),
+                mode: Some("exact".to_string()),
+                color: None,
+            },
+        ];
+
+        let app = App::new(
+            "http://example".to_string(),
+            Duration::from_secs(1),
+            60.0,
+            5,
+            8,
+            HashSet::new(),
+            String::new(),
+            crate::app::LayoutMode::Full,
+            crate::app::ThemeMode::Default,
+            true,
+            Duration::from_millis(400),
+            PathBuf::from("adsb-tui.toml"),
+            3,
+            None,
+            None,
+            false,
+            false,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1,
+            10,
+            true,
+            true,
+            Duration::from_millis(300),
+            0.2,
+            10.0,
+            0.5,
+            Duration::from_secs(60),
+            true,
+            true,
+            true,
+            "msg_rate_total".to_string(),
+            "kbps_total".to_string(),
+            "msg_rate_avg".to_string(),
+            true,
+            Some(PathBuf::from("adsb-watchlist.toml")),
+            watchlist,
+        );
+
+        let ac = sample_aircraft();
+        let entry = app.watch_entry_for(&ac).unwrap();
+        assert_eq!(entry.entry_id(), "high");
+    }
+
+    #[test]
+    fn compare_trends() {
+        assert_eq!(compare_i64(Some(10), Some(20)), TrendDir::Up);
+        assert_eq!(compare_i64(Some(20), Some(10)), TrendDir::Down);
+        assert_eq!(compare_i64(Some(10), Some(10)), TrendDir::Flat);
+        assert_eq!(compare_i64(None, Some(10)), TrendDir::Unknown);
+        assert_eq!(compare_f64(Some(1.0), Some(2.0)), TrendDir::Up);
+    }
+
+    #[test]
+    fn parse_config_value_cases() {
+        assert!(parse_config_value(ConfigKind::Str, "abc").unwrap().is_some());
+        assert_eq!(
+            parse_config_value(ConfigKind::Bool, "true").unwrap(),
+            Some(toml::Value::Boolean(true))
+        );
+        assert_eq!(
+            parse_config_value(ConfigKind::Bool, "0").unwrap(),
+            Some(toml::Value::Boolean(false))
+        );
+        assert!(parse_config_value(ConfigKind::Int, "42").unwrap().is_some());
+        assert!(parse_config_value(ConfigKind::Float, "1.5").unwrap().is_some());
+        assert!(parse_config_value(ConfigKind::Str, " ").unwrap().is_none());
+        assert!(parse_config_value(ConfigKind::Bool, "maybe").is_err());
+    }
+
+    #[test]
+    fn distance_same_point_is_zero() {
+        let dist = distance_mi(26.0, -80.0, 26.0, -80.0);
+        assert!(dist.abs() < 0.0001);
     }
 }

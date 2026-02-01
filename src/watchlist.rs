@@ -50,3 +50,47 @@ impl WatchEntry {
         format!("{}:{}", self.match_type, self.value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WatchEntry;
+
+    #[test]
+    fn defaults_and_entry_id() {
+        let entry = WatchEntry {
+            id: None,
+            label: None,
+            match_type: "hex".to_string(),
+            value: "ac6668".to_string(),
+            enabled: None,
+            notify: None,
+            priority: None,
+            mode: None,
+            color: None,
+        };
+
+        assert!(entry.is_enabled());
+        assert!(entry.notify_enabled());
+        assert_eq!(entry.priority(), 0);
+        assert_eq!(entry.match_mode(), "exact");
+        assert_eq!(entry.entry_id(), "hex:ac6668");
+
+        let entry = WatchEntry {
+            id: Some("custom".to_string()),
+            label: Some("Label".to_string()),
+            match_type: "callsign".to_string(),
+            value: "SWA".to_string(),
+            enabled: Some(false),
+            notify: Some(false),
+            priority: Some(5),
+            mode: Some("prefix".to_string()),
+            color: None,
+        };
+
+        assert!(!entry.is_enabled());
+        assert!(!entry.notify_enabled());
+        assert_eq!(entry.priority(), 5);
+        assert_eq!(entry.match_mode(), "prefix");
+        assert_eq!(entry.entry_id(), "custom");
+    }
+}

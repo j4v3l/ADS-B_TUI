@@ -26,7 +26,25 @@ fn main() -> Result<()> {
     let config = parse_args()?;
     let (tx, rx) = mpsc::channel();
 
-    spawn_fetcher(config.url.clone(), config.refresh, config.insecure, tx);
+    let api_key = if config.api_key.trim().is_empty() {
+        None
+    } else {
+        Some(config.api_key.clone())
+    };
+    let api_key_header = if config.api_key_header.trim().is_empty() {
+        None
+    } else {
+        Some(config.api_key_header.clone())
+    };
+
+    spawn_fetcher(
+        config.url.clone(),
+        config.refresh,
+        config.insecure,
+        api_key,
+        api_key_header,
+        tx,
+    );
 
     let mut favorites: HashSet<String> = config
         .favorites

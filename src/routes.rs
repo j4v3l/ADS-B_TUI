@@ -273,3 +273,63 @@ fn split_route(route: &str) -> Option<(String, String)> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_routes, parse_route_object, split_route};
+    use serde_json::json;
+
+    #[test]
+    fn parse_routes_from_array() {
+        let body = json!([
+            {
+                "callsign": "AAL1",
+                "origin": "KJFK",
+                "destination": "KMIA",
+                "route": "KJFK-KMIA"
+            }
+        ]);
+        let results = parse_routes(body);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].callsign, "AAL1");
+        assert_eq!(results[0].origin.as_deref(), Some("KJFK"));
+        assert_eq!(results[0].destination.as_deref(), Some("KMIA"));
+        assert_eq!(results[0].route.as_deref(), Some("KJFK-KMIA"));
+    }
+
+    #[test]
+    fn parse_routes_from_map() {
+        let body = json!({
+            "routes": {
+                "DAL2": "KLAX-KATL"
+            }
+        });
+        let results = parse_routes(body);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].callsign, "DAL2");
+        assert_eq!(results[0].route.as_deref(), Some("KLAX-KATL"));
+    }
+
+    #[test]
+    fn parse_route_object_with_alts() {
+        let value = json!({
+            "call": "TEST3",
+            "airport1": "KSFO",
+            "airport2": "KSEA"
+        });
+        let result = parse_route_object(&value, None).unwrap();
+        assert_eq!(result.callsign, "TEST3");
+        assert_eq!(result.origin.as_deref(), Some("KSFO"));
+        assert_eq!(result.destination.as_deref(), Some("KSEA"));
+    }
+
+    #[test]
+    fn split_route_parsing() {
+        assert_eq!(
+            split_route("KDEN-KORD"),
+            Some(("KDEN".to_string(), "KORD".to_string()))
+        );
+        assert_eq!(split_route("INVALID"), None);
+        assert_eq!(split_route(" - "), None);
+    }
+}
