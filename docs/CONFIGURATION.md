@@ -35,6 +35,7 @@ insecure = false
 | `refresh_secs` | number | 0 | How often to fetch new data (0 = fetch once) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
 | `stale_secs` | number | 60 | Mark aircraft as stale after this many seconds |
+| `hide_stale` | boolean | false | Hide stale aircraft from the table |
 
 ### Data Quality Settings
 
