@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use app::{App, LayoutMode, RadarRenderer, SiteLocation, ThemeMode};
+use app::{App, LayoutMode, RadarBlip, RadarRenderer, SiteLocation, ThemeMode};
 use config::parse_args;
 use logging::init as init_logging;
 use net::spawn_fetcher;
@@ -91,6 +91,7 @@ fn main() -> Result<()> {
     let layout_mode = LayoutMode::from_str(&config.layout);
     let theme_mode = ThemeMode::from_str(&config.theme);
     let radar_renderer = RadarRenderer::from_str(&config.radar_renderer);
+    let radar_blip = RadarBlip::from_str(&config.radar_blip);
     let site = match (config.site_lat, config.site_lon) {
         (Some(lat), Some(lon)) => Some(SiteLocation {
             lat,
@@ -143,6 +144,7 @@ fn main() -> Result<()> {
             config.radar_aspect,
             radar_renderer,
             config.radar_labels,
+            radar_blip,
             config.route_enabled,
             config.route_mode.eq_ignore_ascii_case("tar1090"),
             Duration::from_secs(config.route_ttl_secs),

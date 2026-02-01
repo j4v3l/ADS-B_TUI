@@ -41,6 +41,7 @@ pub const DEFAULT_RADAR_RANGE_NM: f64 = 200.0;
 pub const DEFAULT_RADAR_ASPECT: f64 = 1.0;
 pub const DEFAULT_RADAR_RENDERER: &str = "canvas";
 pub const DEFAULT_RADAR_LABELS: bool = false;
+pub const DEFAULT_RADAR_BLIP: &str = "dot";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -68,6 +69,7 @@ pub struct Config {
     pub radar_aspect: f64,
     pub radar_renderer: String,
     pub radar_labels: bool,
+    pub radar_blip: String,
     pub site_lat: Option<f64>,
     pub site_lon: Option<f64>,
     pub site_alt_m: Option<f64>,
@@ -121,6 +123,7 @@ struct FileConfig {
     radar_aspect: Option<f64>,
     radar_renderer: Option<String>,
     radar_labels: Option<bool>,
+    radar_blip: Option<String>,
     site_lat: Option<f64>,
     site_lon: Option<f64>,
     site_alt_m: Option<f64>,
@@ -193,6 +196,7 @@ pub fn parse_args() -> Result<Config> {
         radar_aspect: DEFAULT_RADAR_ASPECT,
         radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
         radar_labels: DEFAULT_RADAR_LABELS,
+        radar_blip: DEFAULT_RADAR_BLIP.to_string(),
         site_lat: None,
         site_lon: None,
         site_alt_m: None,
@@ -317,6 +321,9 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_RADAR_LABELS") {
         config.radar_labels = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_RADAR_BLIP") {
+        config.radar_blip = value;
     }
     if let Ok(value) = env::var("ADSB_SITE_LAT") {
         if let Ok(val) = value.parse::<f64>() {
@@ -557,6 +564,12 @@ pub fn parse_args() -> Result<Config> {
                 config.radar_renderer = iter
                     .next()
                     .ok_or_else(|| anyhow!("--radar-renderer needs a value"))?
+                    .to_string();
+            }
+            "--radar-blip" => {
+                config.radar_blip = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--radar-blip needs a value"))?
                     .to_string();
             }
             "--radar-labels" => {
@@ -807,6 +820,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(radar_labels) = file.radar_labels {
         target.radar_labels = radar_labels;
     }
+    if let Some(radar_blip) = file.radar_blip {
+        target.radar_blip = radar_blip;
+    }
     if let Some(site_lat) = file.site_lat {
         target.site_lat = Some(site_lat);
     }
@@ -901,6 +917,7 @@ fn print_help() {
         "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix]"
     );
     println!("       [--radar-range-nm NM] [--radar-aspect RATIO] [--radar-renderer canvas|ascii]");
+    println!("       [--radar-blip dot|block|plane]");
     println!("       [--radar-labels] [--no-radar-labels]");
     println!("       [--site-lat LAT] [--site-lon LON] [--site-alt-m METERS]");
     println!("       [--route-base URL] [--route-ttl SECS] [--route-refresh SECS]");
@@ -926,7 +943,7 @@ fn print_help() {
     println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");
     println!("Environment: ADSB_RATE_WINDOW_MS ADSB_RATE_MIN_SECS control msg rate smoothing");
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
-    println!("Environment: ADSB_RADAR_RANGE_NM/ASPECT/RENDERER control radar display");
+    println!("Environment: ADSB_RADAR_RANGE_NM/ASPECT/RENDERER/BLIP control radar display");
     println!("Environment: ADSB_RADAR_LABELS toggles radar blip labels");
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
@@ -981,6 +998,7 @@ mod tests {
             radar_aspect: DEFAULT_RADAR_ASPECT,
             radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
             radar_labels: DEFAULT_RADAR_LABELS,
+            radar_blip: DEFAULT_RADAR_BLIP.to_string(),
             site_lat: None,
             site_lon: None,
             site_alt_m: None,

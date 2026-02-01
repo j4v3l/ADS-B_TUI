@@ -9,7 +9,7 @@ use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, LayoutMode, RadarRenderer};
+use crate::app::{App, LayoutMode, RadarBlip, RadarRenderer};
 use crate::model::{seen_seconds, Aircraft};
 
 const SWEEP_PERIOD_MS: u64 = 4500;
@@ -23,6 +23,7 @@ pub struct RadarTheme {
     pub dim: Color,
     pub fav: Color,
     pub warn: Color,
+    pub highlight: Color,
     pub panel_bg: Color,
 }
 
@@ -31,6 +32,7 @@ pub struct RadarSettings {
     pub range_nm: f64,
     pub aspect: f64,
     pub renderer: RadarRenderer,
+    pub blip: RadarBlip,
 }
 
 pub fn render(
@@ -68,6 +70,7 @@ pub fn render(
 struct RadarPoint {
     x: f64,
     y: f64,
+    track: Option<f64>,
     fav: bool,
     current: bool,
     seen_secs: Option<f64>,
@@ -105,6 +108,7 @@ fn collect_data(
     struct RawPoint {
         lat: f64,
         lon: f64,
+        track: Option<f64>,
         fav: bool,
         current: bool,
         seen_secs: Option<f64>,
@@ -133,6 +137,7 @@ fn collect_data(
             raw_points.push(RawPoint {
                 lat,
                 lon,
+                track: ac.track,
                 fav: app.is_favorite(ac),
                 current: true,
                 seen_secs: seen_seconds(ac),
@@ -147,6 +152,7 @@ fn collect_data(
                 raw_points.push(RawPoint {
                     lat: point.lat,
                     lon: point.lon,
+                    track: None,
                     fav: app.is_favorite(ac),
                     current: false,
                     seen_secs: None,
@@ -182,6 +188,7 @@ fn collect_data(
         points.push(RadarPoint {
             x,
             y,
+            track: raw.track,
             fav: raw.fav,
             current: raw.current,
             seen_secs: raw.seen_secs,
@@ -324,23 +331,51 @@ fn render_canvas(
                     color: theme.fav,
                 });
             }
-            if !current.is_empty() {
-                ctx.draw(&Points {
-                    coords: &current,
-                    color: theme.dim,
-                });
-            }
-            if !current_fresh.is_empty() {
-                ctx.draw(&Points {
-                    coords: &current_fresh,
-                    color: theme.accent,
-                });
-            }
-            if !current_fav.is_empty() {
-                ctx.draw(&Points {
-                    coords: &current_fav,
-                    color: theme.fav,
-                });
+
+            match settings.blip {
+                RadarBlip::Dot => {
+                    if !current.is_empty() {
+                        ctx.draw(&Points {
+                            coords: &current,
+                            color: theme.dim,
+                        });
+                    }
+                    if !current_fresh.is_empty() {
+                        ctx.draw(&Points {
+                            coords: &current_fresh,
+                            color: theme.accent,
+                        });
+                    }
+                    if !current_fav.is_empty() {
+                        ctx.draw(&Points {
+                            coords: &current_fav,
+                            color: theme.fav,
+                        });
+                    }
+                }
+                _ => {
+                    for point in &data.points {
+                        if !point.current {
+                            continue;
+                        }
+                        let color = if point.fav {
+                            theme.fav
+                        } else if point.seen_secs.map(|s| s <= 1.0).unwrap_or(false) {
+                            theme.accent
+                        } else {
+                            theme.dim
+                        };
+                        let glyph = blip_glyph(settings.blip, point.track);
+                        ctx.print(
+                            point.x,
+                            point.y,
+                            TextLine::from(Span::styled(
+                                glyph.to_string(),
+                                Style::default().fg(color),
+                            )),
+                        );
+                    }
+                }
             }
             if !data.labels.is_empty() {
                 let label_offset = (range * 0.02).max(0.6).min(5.0);
@@ -375,7 +410,7 @@ fn render_canvas(
 
                 for label in drawn {
                     let color = if label.selected {
-                        theme.warn
+                        theme.highlight
                     } else if label.fav {
                         theme.fav
                     } else if label.fresh {
@@ -400,21 +435,21 @@ fn render_canvas(
                         x,
                         y,
                         radius: marker,
-                        color: theme.warn,
+                        color: theme.highlight,
                     });
                     ctx.draw(&CanvasLine {
                         x1: x - marker,
                         y1: y,
                         x2: x + marker,
                         y2: y,
-                        color: theme.warn,
+                        color: theme.highlight,
                     });
                     ctx.draw(&CanvasLine {
                         x1: x,
                         y1: y - marker,
                         x2: x,
                         y2: y + marker,
-                        color: theme.warn,
+                        color: theme.highlight,
                     });
                 }
             }
@@ -554,6 +589,34 @@ fn append_unique_labels<'a>(target: &mut Vec<&'a RadarLabel>, source: &[&'a Rada
         if !target.iter().any(|existing| existing.id == label.id) {
             target.push(*label);
         }
+    }
+}
+
+fn blip_glyph(style: RadarBlip, track: Option<f64>) -> &'static str {
+    match style {
+        RadarBlip::Plane => track
+            .map(direction_glyph)
+            .unwrap_or("✈"),
+        RadarBlip::Block => "■",
+        RadarBlip::Dot => "•",
+    }
+}
+
+fn direction_glyph(track: f64) -> &'static str {
+    let mut heading = track % 360.0;
+    if heading < 0.0 {
+        heading += 360.0;
+    }
+    let idx = ((heading + 22.5) / 45.0).floor() as usize % 8;
+    match idx {
+        0 => "↑",
+        1 => "↗",
+        2 => "→",
+        3 => "↘",
+        4 => "↓",
+        5 => "↙",
+        6 => "←",
+        _ => "↖",
     }
 }
 

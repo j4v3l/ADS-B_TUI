@@ -95,6 +95,7 @@ layout = "full" # full, compact, radar
 radar_range_nm = 200.0
 radar_renderer = "canvas"
 radar_labels = false
+radar_blip = "block"
 
 # Enable country flags
 flags_enabled = true
@@ -123,6 +124,7 @@ smooth_mode = true
 | `radar_aspect` | Radar Y-axis scale factor | 1.0 |
 | `radar_renderer` | Radar renderer ("canvas", "ascii") | "canvas" |
 | `radar_labels` | Show labels above radar blips (full radar layout) | false |
+| `radar_blip` | Blip style ("dot", "block", "plane") | "dot" |
 | `flags_enabled` | Show country flags | true |
 | `ui_fps` | UI refresh rate | 60 |
 | `smooth_mode` | Enable smooth scrolling | true |
