@@ -1133,6 +1133,16 @@ impl App {
         self.route_tar1090
     }
 
+    pub fn route_pending(&self, callsign: &str, now: SystemTime) -> bool {
+        let key = normalize_callsign(callsign);
+        let window = self.route_pending_window();
+        self.route_last_request
+            .get(&key)
+            .and_then(|last| now.duration_since(*last).ok())
+            .map(|delta| delta <= window)
+            .unwrap_or(false)
+    }
+
     pub fn msg_rate_display(&self) -> Option<f64> {
         let now = SystemTime::now();
         let global_recent = self
@@ -1253,6 +1263,16 @@ impl App {
             });
         }
         requests
+    }
+
+    fn route_pending_window(&self) -> Duration {
+        if self.route_refresh.is_zero() {
+            Duration::from_secs(10)
+        } else {
+            self.route_refresh
+                .min(Duration::from_secs(10))
+                .max(Duration::from_secs(2))
+        }
     }
 
     fn note_route_failure(&mut self, message: &str, now: SystemTime) {

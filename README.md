@@ -9,10 +9,6 @@ A modern, fast, and user-friendly terminal interface for tracking aircraft using
 [![Crates.io](https://img.shields.io/crates/v/adsb-tui.svg)](https://crates.io/crates/adsb-tui)
 [![Downloads](https://img.shields.io/github/downloads/j4v3l/adsb-tui/total.svg)](https://github.com/j4v3l/adsb-tui/releases)
 [![GitHub Stars](https://img.shields.io/github/stars/j4v3l/adsb-tui.svg)](https://github.com/j4v3l/adsb-tui/stargazers)
-[![Discord](https://img.shields.io/discord/1234567890?label=Discord)](https://discord.gg/adsb-tui)
-[![Matrix](https://img.shields.io/badge/Matrix-%23adsb--tui%3Amatrix.org-blue)](https://matrix.to/#/#adsb-tui:matrix.org)
-
-> **Note**: Discord badge uses placeholder server ID. Update with your actual Discord server ID.
 
 ![adsb-tui screenshot](https://via.placeholder.com/800x400/1a1a1a/ffffff?text=ADS-B+TUI+Screenshot)
 

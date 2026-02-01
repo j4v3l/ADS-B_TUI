@@ -1676,13 +1676,14 @@ fn route_pending_for(
     ac: &crate::model::Aircraft,
     route: Option<&crate::app::RouteInfo>,
 ) -> bool {
-    app.route_enabled()
-        && route.is_none()
-        && ac
-            .flight
-            .as_deref()
-            .map(|s| !s.trim().is_empty())
-            .unwrap_or(false)
+    if !app.route_enabled() || route.is_some() {
+        return false;
+    }
+    let callsign = ac.flight.as_deref().map(str::trim).unwrap_or("");
+    if callsign.is_empty() {
+        return false;
+    }
+    app.route_pending(callsign, SystemTime::now())
 }
 
 fn route_pending_text() -> &'static str {
