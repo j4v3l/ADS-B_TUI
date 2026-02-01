@@ -38,6 +38,7 @@ pub const DEFAULT_STATS_METRIC_1: &str = "msg_rate_total";
 pub const DEFAULT_STATS_METRIC_2: &str = "kbps_total";
 pub const DEFAULT_STATS_METRIC_3: &str = "msg_rate_avg";
 pub const DEFAULT_FLAGS_ENABLED: bool = true;
+pub const DEFAULT_FLAG_STYLE: &str = "emoji";
 pub const DEFAULT_RADAR_RANGE_NM: f64 = 200.0;
 pub const DEFAULT_RADAR_ASPECT: f64 = 1.0;
 pub const DEFAULT_RADAR_RENDERER: &str = "canvas";
@@ -95,6 +96,7 @@ pub struct Config {
     pub column_cache: bool,
     pub track_arrows: bool,
     pub flags_enabled: bool,
+    pub flag_style: String,
     pub stats_metric_1: String,
     pub stats_metric_2: String,
     pub stats_metric_3: String,
@@ -150,6 +152,7 @@ struct FileConfig {
     column_cache: Option<bool>,
     track_arrows: Option<bool>,
     flags_enabled: Option<bool>,
+    flag_style: Option<String>,
     stats_metric_1: Option<String>,
     stats_metric_2: Option<String>,
     stats_metric_3: Option<String>,
@@ -224,6 +227,7 @@ pub fn parse_args() -> Result<Config> {
         column_cache: DEFAULT_COLUMN_CACHE,
         track_arrows: DEFAULT_TRACK_ARROWS,
         flags_enabled: DEFAULT_FLAGS_ENABLED,
+        flag_style: DEFAULT_FLAG_STYLE.to_string(),
         stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
         stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
         stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
@@ -312,6 +316,9 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_THEME") {
         config.theme = value;
+    }
+    if let Ok(value) = env::var("ADSB_FLAG_STYLE") {
+        config.flag_style = value;
     }
     if let Ok(value) = env::var("ADSB_RADAR_RANGE_NM") {
         if let Ok(val) = value.parse::<f64>() {
@@ -559,6 +566,12 @@ pub fn parse_args() -> Result<Config> {
                 config.theme = iter
                     .next()
                     .ok_or_else(|| anyhow!("--theme needs a value"))?
+                    .to_string();
+            }
+            "--flag-style" => {
+                config.flag_style = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--flag-style needs a value"))?
                     .to_string();
             }
             "--radar-range-nm" => {
@@ -908,6 +921,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(flags_enabled) = file.flags_enabled {
         target.flags_enabled = flags_enabled;
     }
+    if let Some(flag_style) = file.flag_style {
+        target.flag_style = flag_style;
+    }
     if let Some(stats_metric_1) = file.stats_metric_1 {
         target.stats_metric_1 = stats_metric_1;
     }
@@ -944,6 +960,7 @@ fn print_help() {
     println!("       [--notify-mi MILES] [--overpass-mi MILES] [--notify-cooldown SECS]");
     println!("       [--column-cache] [--no-column-cache]");
     println!("       [--track-arrows] [--no-track-arrows]");
+    println!("       [--flag-style emoji|text|none]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
     println!("Environment: ADSB_URL overrides the default URL");
@@ -965,6 +982,7 @@ fn print_help() {
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
     println!("Environment: ADSB_TRACK_ARROWS toggles track direction arrows");
+    println!("Environment: ADSB_FLAG_STYLE sets flag rendering mode");
     println!("Environment: ADSB_STATS_METRIC_1/2/3 control stats metrics");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
     println!("      t theme | l layout | R radar | b labels | e export csv | E export json");
@@ -1040,6 +1058,7 @@ mod tests {
             column_cache: DEFAULT_COLUMN_CACHE,
             track_arrows: DEFAULT_TRACK_ARROWS,
             flags_enabled: DEFAULT_FLAGS_ENABLED,
+            flag_style: DEFAULT_FLAG_STYLE.to_string(),
             stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
             stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
             stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
@@ -1060,6 +1079,7 @@ log_file = "adsb-tui.log"
 watchlist_enabled = false
 watchlist_file = "custom-watch.toml"
 hide_stale = true
+flag_style = "text"
 radar_range_nm = 250.0
 radar_aspect = 1.2
 radar_renderer = "ascii"
@@ -1078,6 +1098,7 @@ radar_blip = "block"
         assert_eq!(cfg.watchlist_enabled, Some(false));
         assert_eq!(cfg.watchlist_file.as_deref(), Some("custom-watch.toml"));
         assert_eq!(cfg.hide_stale, Some(true));
+        assert_eq!(cfg.flag_style.as_deref(), Some("text"));
         assert_eq!(cfg.radar_range_nm, Some(250.0));
         assert_eq!(cfg.radar_aspect, Some(1.2));
         assert_eq!(cfg.radar_renderer.as_deref(), Some("ascii"));
@@ -1102,6 +1123,7 @@ radar_blip = "block"
             watchlist_enabled: Some(false),
             watchlist_file: Some("wl.toml".to_string()),
             hide_stale: Some(true),
+            flag_style: Some("none".to_string()),
             radar_range_nm: Some(300.0),
             radar_aspect: Some(0.1),
             radar_renderer: Some("ascii".to_string()),
@@ -1121,6 +1143,7 @@ radar_blip = "block"
         assert!(!cfg.watchlist_enabled);
         assert_eq!(cfg.watchlist_file, "wl.toml");
         assert!(cfg.hide_stale);
+        assert_eq!(cfg.flag_style, "none");
         assert_eq!(cfg.radar_range_nm, 300.0);
         assert_eq!(cfg.radar_aspect, 0.2);
         assert_eq!(cfg.radar_renderer, "ascii");

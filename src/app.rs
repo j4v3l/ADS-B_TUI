@@ -126,6 +126,23 @@ pub enum ThemeMode {
     Monochrome,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlagStyle {
+    Emoji,
+    Text,
+    None,
+}
+
+impl FlagStyle {
+    pub fn from_str(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "text" | "code" => FlagStyle::Text,
+            "none" | "off" => FlagStyle::None,
+            _ => FlagStyle::Emoji,
+        }
+    }
+}
+
 impl ThemeMode {
     pub fn toggle(self) -> Self {
         match self {
@@ -333,6 +350,7 @@ pub struct App {
     pub(crate) stats_metrics: [String; 3],
     #[allow(dead_code)]
     pub(crate) flags_enabled: bool,
+    pub(crate) flag_style: FlagStyle,
     pub(crate) route_last_poll: Option<SystemTime>,
     pub(crate) route_cache: HashMap<String, RouteInfo>,
     pub(crate) route_last_request: HashMap<String, SystemTime>,
@@ -406,6 +424,7 @@ impl App {
         altitude_trend_arrows: bool,
         track_arrows: bool,
         flags_enabled: bool,
+        flag_style: FlagStyle,
         stats_metric_1: String,
         stats_metric_2: String,
         stats_metric_3: String,
@@ -494,6 +513,7 @@ impl App {
             track_arrows,
             stats_metrics: [stats_metric_1, stats_metric_2, stats_metric_3],
             flags_enabled,
+            flag_style,
             route_last_poll: None,
             route_cache: HashMap::new(),
             route_last_request: HashMap::new(),
@@ -2455,6 +2475,11 @@ fn default_config_items() -> Vec<ConfigItem> {
         ConfigKind::Bool,
         config::DEFAULT_FLAGS_ENABLED.to_string(),
     );
+    push_item(
+        "flag_style",
+        ConfigKind::Str,
+        config::DEFAULT_FLAG_STYLE.to_string(),
+    );
 
     items
 }
@@ -2694,6 +2719,7 @@ mod tests {
             true,
             true,
             true,
+            crate::app::FlagStyle::Emoji,
             "msg_rate_total".to_string(),
             "kbps_total".to_string(),
             "msg_rate_avg".to_string(),

@@ -49,6 +49,7 @@ insecure = false
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `flags_enabled` | boolean | true | Show country flags for aircraft |
+| `flag_style` | string | "emoji" | Flag style ("emoji", "text", "none") |
 | `trail_len` | number | 6 | Length of aircraft trail lines |
 | `radar_range_nm` | number | 200.0 | Radar max range in nautical miles |
 | `radar_aspect` | number | 1.0 | Radar Y-axis scale factor for aspect compensation |
@@ -122,6 +123,7 @@ insecure = false
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 2
 flags_enabled = true
+flag_style = "emoji"
 site_lat = 40.7128
 site_lon = -74.0060
 site_alt_m = 10.0
@@ -139,6 +141,7 @@ log_enabled = true
 log_level = "debug"
 log_file = "adsb-tui.log"
 flags_enabled = true
+flag_style = "emoji"
 route_enabled = true
 site_lat = 51.5074
 site_lon = -0.1278
@@ -154,6 +157,7 @@ ui_fps = 120
 smooth_mode = true
 column_cache = true
 flags_enabled = true
+flag_style = "emoji"
 route_enabled = true
 site_lat = 37.7749
 site_lon = -122.4194

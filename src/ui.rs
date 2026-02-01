@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, 
 use ratatui::Frame;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::app::{App, ColumnId, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
+use crate::app::{App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
 use crate::model::seen_seconds;
 use crate::radar::{self, RadarSettings, RadarTheme};
 
@@ -628,6 +628,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 app.site(),
                 app.altitude_trend_arrows,
                 app.track_arrows,
+                app.flag_style,
             )
         });
 
@@ -1691,7 +1692,7 @@ fn compute_column_widths(
                 ColumnId::Seen => fmt_f64(seen_seconds(ac), 0, 0),
                 ColumnId::Msgs => fmt_u64(ac.messages, 0),
                 ColumnId::Hex => fmt_text(ac.hex.as_deref()),
-                ColumnId::Flag => get_flag(ac.r.as_deref()).to_string(),
+                ColumnId::Flag => get_flag(ac.r.as_deref(), app.flag_style),
             };
             desired[i] = desired[i].max(text_len(&value));
         }
@@ -1776,6 +1777,7 @@ fn cell_for_column(
     site: Option<SiteLocation>,
     altitude_trend_arrows: bool,
     track_arrows: bool,
+    flag_style: FlagStyle,
 ) -> Cell<'static> {
     let mut text = match id {
         ColumnId::Fav => {
@@ -1812,7 +1814,7 @@ fn cell_for_column(
         ColumnId::Seen => fmt_f64(seen, 0, 0),
         ColumnId::Msgs => fmt_u64(ac.messages, 0),
         ColumnId::Hex => fmt_text(ac.hex.as_deref()),
-        ColumnId::Flag => get_flag(ac.r.as_deref()).to_string(),
+        ColumnId::Flag => get_flag(ac.r.as_deref(), flag_style),
     };
 
     text = truncate_to_width(text, width);
@@ -1901,7 +1903,38 @@ fn column_name(id: ColumnId) -> &'static str {
     }
 }
 
-fn get_flag(registration: Option<&str>) -> &'static str {
+fn get_flag(registration: Option<&str>, style: FlagStyle) -> String {
+    match style {
+        FlagStyle::None => String::new(),
+        FlagStyle::Emoji => flag_emoji(registration).to_string(),
+        FlagStyle::Text => flag_text(registration),
+    }
+}
+
+fn flag_text(registration: Option<&str>) -> String {
+    let emoji = flag_emoji(registration);
+    emoji_to_code(emoji).unwrap_or_else(|| "--".to_string())
+}
+
+fn emoji_to_code(emoji: &str) -> Option<String> {
+    let mut chars = emoji.chars();
+    let first = chars.next()?;
+    let second = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    let base = 0x1F1E6;
+    let first = first as u32;
+    let second = second as u32;
+    if !(base..=base + 25).contains(&first) || !(base..=base + 25).contains(&second) {
+        return None;
+    }
+    let a = char::from_u32((first - base) + ('A' as u32))?;
+    let b = char::from_u32((second - base) + ('A' as u32))?;
+    Some(format!("{a}{b}"))
+}
+
+fn flag_emoji(registration: Option<&str>) -> &'static str {
     if let Some(reg) = registration {
         if reg.is_empty() {
             return "🏳️";
@@ -2151,33 +2184,42 @@ mod tests {
         center_text, fmt_f64_trend, fmt_i64_trend, fmt_text, format_track_cell,
         format_track_display, get_flag, text_len, truncate_to_width, TrendDir,
     };
+    use crate::app::FlagStyle;
 
     #[test]
     fn test_get_flag() {
         // Test single-letter prefixes
-        assert_eq!(get_flag(Some("N12345")), "🇺🇸"); // USA
-        assert_eq!(get_flag(Some("GABCD")), "🇬🇧");  // UK
-        assert_eq!(get_flag(Some("PH123")), "🇳🇱");  // Netherlands (two-letter)
-        assert_eq!(get_flag(Some("")), "🏳️");       // Empty
-        assert_eq!(get_flag(None), "🏳️");           // None
-        assert_eq!(get_flag(Some("9K123")), "🇰🇼"); // Kuwait (two-letter starting with digit)
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::Emoji), "🇺🇸"); // USA
+        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Emoji), "🇬🇧");  // UK
+        assert_eq!(get_flag(Some("PH123"), FlagStyle::Emoji), "🇳🇱");  // Netherlands (two-letter)
+        assert_eq!(get_flag(Some(""), FlagStyle::Emoji), "🏳️");       // Empty
+        assert_eq!(get_flag(None, FlagStyle::Emoji), "🏳️");           // None
+        assert_eq!(get_flag(Some("9K123"), FlagStyle::Emoji), "🇰🇼"); // Kuwait (two-letter starting with digit)
 
         // Test more country codes
-        assert_eq!(get_flag(Some("DABCD")), "🇩🇪");  // Germany
-        assert_eq!(get_flag(Some("FABCD")), "🇫🇷");  // France
-        assert_eq!(get_flag(Some("JABCD")), "🇯🇵");  // Japan
-        assert_eq!(get_flag(Some("C1234")), "🇨🇦");  // Canada
-        assert_eq!(get_flag(Some("LY123")), "🇱🇹");  // Lithuania (two-letter)
-        assert_eq!(get_flag(Some("ZS123")), "🇿🇦");  // South Africa (two-letter)
+        assert_eq!(get_flag(Some("DABCD"), FlagStyle::Emoji), "🇩🇪");  // Germany
+        assert_eq!(get_flag(Some("FABCD"), FlagStyle::Emoji), "🇫🇷");  // France
+        assert_eq!(get_flag(Some("JABCD"), FlagStyle::Emoji), "🇯🇵");  // Japan
+        assert_eq!(get_flag(Some("C1234"), FlagStyle::Emoji), "🇨🇦");  // Canada
+        assert_eq!(get_flag(Some("LY123"), FlagStyle::Emoji), "🇱🇹");  // Lithuania (two-letter)
+        assert_eq!(get_flag(Some("ZS123"), FlagStyle::Emoji), "🇿🇦");  // South Africa (two-letter)
     }
 
     #[test]
     fn test_get_flag_edge_cases() {
         // Test various edge cases
-        assert_eq!(get_flag(Some("A")), "🇦🇺");      // Single character
-        assert_eq!(get_flag(Some("1")), "🏳️");      // Invalid single digit
-        assert_eq!(get_flag(Some("123")), "🏳️");    // All digits
-        assert_eq!(get_flag(Some("X9Y")), "🇨🇳");    // Single letter fallback
+        assert_eq!(get_flag(Some("A"), FlagStyle::Emoji), "🇦🇺");      // Single character
+        assert_eq!(get_flag(Some("1"), FlagStyle::Emoji), "🏳️");      // Invalid single digit
+        assert_eq!(get_flag(Some("123"), FlagStyle::Emoji), "🏳️");    // All digits
+        assert_eq!(get_flag(Some("X9Y"), FlagStyle::Emoji), "🇨🇳");    // Single letter fallback
+    }
+
+    #[test]
+    fn test_get_flag_text_and_none() {
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::Text), "US");
+        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Text), "GB");
+        assert_eq!(get_flag(Some("1"), FlagStyle::Text), "--");
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::None), "");
     }
 
     #[test]
