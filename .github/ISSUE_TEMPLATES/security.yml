@@ -1,0 +1,96 @@
+---
+name: Security Vulnerability
+description: Report a security vulnerability
+title: "[SECURITY] "
+labels: ["security", "vulnerability"]
+assignees: ["j4v3l"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Security Vulnerability Report
+
+        ⚠️ **Important**: Please report security vulnerabilities responsibly. Do not create public issues for security problems.
+
+        If you believe you've found a security vulnerability, please report it privately by emailing [security@j4v3l.dev](mailto:security@j4v3l.dev) or contacting the maintainer directly.
+
+        This template is for confirmed, non-sensitive security discussions only.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Vulnerability Summary
+      description: Brief description of the security issue (avoid sensitive details in public issues).
+      placeholder: "Buffer overflow in..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this vulnerability?
+      options:
+        - Critical
+        - High
+        - Medium
+        - Low
+        - Informational
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Vulnerability Type
+      description: What type of vulnerability is this?
+      options:
+        - Remote Code Execution (RCE)
+        - SQL Injection
+        - Cross-Site Scripting (XSS)
+        - Authentication Bypass
+        - Information Disclosure
+        - Denial of Service (DoS)
+        - Other (please specify)
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential Impact
+      description: What could an attacker achieve by exploiting this?
+      placeholder: "An attacker could..."
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: How can this vulnerability be reproduced? (High-level only, avoid exploit code)
+      placeholder: "1. Send a request with... 2. Observe..."
+
+  - type: input
+    id: version
+    attributes:
+      label: Affected Version
+      description: Which version(s) are affected?
+      placeholder: "0.1.0"
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested Mitigation
+      description: How could this be fixed?
+      placeholder: "Input validation should be added to..."
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Security Checklist
+      options:
+        - label: This is a legitimate security vulnerability
+          required: true
+        - label: I have not disclosed this publicly before responsible disclosure
+          required: true
+        - label: I am willing to help verify the fix
+          required: true

@@ -17,6 +17,14 @@ run:
 run-insecure:
     cargo run -- --insecure
 
+# Run the application with logging enabled
+run-log:
+    cargo run -- --log-enabled
+
+# Run the application with debug logging
+run-debug:
+    RUST_LOG=debug cargo run -- --log-enabled --log-level debug
+
 # Format the code
 fmt:
     cargo fmt
@@ -68,6 +76,8 @@ info:
     @echo "  just test           - Run tests"
     @echo "  just check          - Run all checks (fmt, clippy, test)"
     @echo "  just run            - Run the application"
+    @echo "  just run-log        - Run with logging enabled"
+    @echo "  just run-debug      - Run with debug logging"
     @echo "  just doc            - Generate documentation"
     @echo "  just clean          - Clean build artifacts"
 
