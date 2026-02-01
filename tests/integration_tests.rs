@@ -72,7 +72,8 @@ fn test_readme_exists_and_complete() {
         "## 🚀 Quick Start",
         "## 📖 Configuration",
         "## 🎮 Controls",
-        "## 🛠️ Development",
+        "## � Logging",
+        "## �🛠️ Development",
     ];
 
     for section in required_sections {
