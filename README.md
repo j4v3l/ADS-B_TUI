@@ -100,6 +100,7 @@ radar_blip = "block"
 
 # Enable country flags
 flags_enabled = true
+flag_style = "emoji" # emoji, text, none
 
 # UI refresh rate in FPS
 ui_fps = 60
@@ -128,6 +129,7 @@ smooth_mode = true
 | `radar_labels` | Show labels above radar blips (full radar layout) | false |
 | `radar_blip` | Blip style ("dot", "block", "plane") | "dot" |
 | `flags_enabled` | Show country flags | true |
+| `flag_style` | Flag style ("emoji", "text", "none") | "emoji" |
 | `ui_fps` | UI refresh rate | 60 |
 | `smooth_mode` | Enable smooth scrolling | true |
 | `log_enabled` | Enable logging to file | false |

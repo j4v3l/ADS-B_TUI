@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use app::{App, LayoutMode, RadarBlip, RadarRenderer, SiteLocation, ThemeMode};
+use app::{App, FlagStyle, LayoutMode, RadarBlip, RadarRenderer, SiteLocation, ThemeMode};
 use config::parse_args;
 use logging::init as init_logging;
 use net::spawn_fetcher;
@@ -92,6 +92,7 @@ fn main() -> Result<()> {
     let theme_mode = ThemeMode::from_str(&config.theme);
     let radar_renderer = RadarRenderer::from_str(&config.radar_renderer);
     let radar_blip = RadarBlip::from_str(&config.radar_blip);
+    let flag_style = FlagStyle::from_str(&config.flag_style);
     let site = match (config.site_lat, config.site_lon) {
         (Some(lat), Some(lon)) => Some(SiteLocation {
             lat,
@@ -162,6 +163,7 @@ fn main() -> Result<()> {
             config.altitude_trend_arrows,
             config.track_arrows,
             config.flags_enabled,
+            flag_style,
             config.stats_metric_1.clone(),
             config.stats_metric_2.clone(),
             config.stats_metric_3.clone(),
