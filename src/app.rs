@@ -55,13 +55,15 @@ pub enum InputMode {
 pub enum LayoutMode {
     Full,
     Compact,
+    Radar,
 }
 
 impl LayoutMode {
     pub fn toggle(self) -> Self {
         match self {
             LayoutMode::Full => LayoutMode::Compact,
-            LayoutMode::Compact => LayoutMode::Full,
+            LayoutMode::Compact => LayoutMode::Radar,
+            LayoutMode::Radar => LayoutMode::Full,
         }
     }
 
@@ -69,13 +71,37 @@ impl LayoutMode {
         match self {
             LayoutMode::Full => "FULL",
             LayoutMode::Compact => "COMPACT",
+            LayoutMode::Radar => "RADAR",
         }
     }
 
     pub fn from_str(value: &str) -> Self {
         match value.to_ascii_lowercase().as_str() {
             "compact" => LayoutMode::Compact,
+            "radar" => LayoutMode::Radar,
             _ => LayoutMode::Full,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadarRenderer {
+    Canvas,
+    Ascii,
+}
+
+impl RadarRenderer {
+    pub fn label(self) -> &'static str {
+        match self {
+            RadarRenderer::Canvas => "CANVAS",
+            RadarRenderer::Ascii => "ASCII",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "ascii" => RadarRenderer::Ascii,
+            _ => RadarRenderer::Canvas,
         }
     }
 }
@@ -269,6 +295,9 @@ pub struct App {
     pub(crate) watchlist_cursor: usize,
     pub(crate) trail_len: usize,
     pub(crate) site: Option<SiteLocation>,
+    pub(crate) radar_range_nm: f64,
+    pub(crate) radar_aspect: f64,
+    pub(crate) radar_renderer: RadarRenderer,
     pub(crate) columns: Vec<ColumnConfig>,
     pub(crate) column_cursor: usize,
     pub(crate) smooth_mode: bool,
@@ -337,6 +366,9 @@ impl App {
         trail_len: usize,
         favorites_path: Option<PathBuf>,
         site: Option<SiteLocation>,
+        radar_range_nm: f64,
+        radar_aspect: f64,
+        radar_renderer: RadarRenderer,
         route_enabled: bool,
         route_tar1090: bool,
         route_ttl: Duration,
@@ -409,6 +441,9 @@ impl App {
             watchlist_cursor: 0,
             trail_len: trail_len.max(1),
             site,
+            radar_range_nm: radar_range_nm.max(1.0),
+            radar_aspect: radar_aspect.max(0.2),
+            radar_renderer,
             columns: {
                 let mut cols = default_columns();
                 if let Some(flag_col) = cols.iter_mut().find(|c| c.id == ColumnId::Flag) {
@@ -550,6 +585,13 @@ impl App {
     pub fn toggle_layout(&mut self) {
         self.layout_mode = self.layout_mode.toggle();
         debug!("layout -> {}", self.layout_mode.label());
+    }
+
+    pub fn set_layout(&mut self, layout_mode: LayoutMode) {
+        if self.layout_mode != layout_mode {
+            self.layout_mode = layout_mode;
+            debug!("layout -> {}", self.layout_mode.label());
+        }
     }
 
     pub fn open_columns(&mut self) {
@@ -2208,6 +2250,21 @@ fn default_config_items() -> Vec<ConfigItem> {
     push_item("filter", ConfigKind::Str, "".to_string());
     push_item("layout", ConfigKind::Str, "full".to_string());
     push_item("theme", ConfigKind::Str, "default".to_string());
+    push_item(
+        "radar_range_nm",
+        ConfigKind::Float,
+        config::DEFAULT_RADAR_RANGE_NM.to_string(),
+    );
+    push_item(
+        "radar_aspect",
+        ConfigKind::Float,
+        config::DEFAULT_RADAR_ASPECT.to_string(),
+    );
+    push_item(
+        "radar_renderer",
+        ConfigKind::Str,
+        config::DEFAULT_RADAR_RENDERER.to_string(),
+    );
     push_item("site_lat", ConfigKind::Float, "".to_string());
     push_item("site_lon", ConfigKind::Float, "".to_string());
     push_item("site_alt_m", ConfigKind::Float, "".to_string());
@@ -2539,6 +2596,9 @@ mod tests {
             3,
             None,
             None,
+            200.0,
+            1.0,
+            crate::app::RadarRenderer::Canvas,
             false,
             false,
             Duration::from_secs(1),

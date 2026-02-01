@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app::{App, ColumnId, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
 use crate::model::seen_seconds;
+use crate::radar::{self, RadarSettings, RadarTheme};
 
 struct Theme {
     accent: Color,
@@ -42,6 +43,7 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
     match app.layout_mode {
         LayoutMode::Full => render_full_body(f, chunks[2], app, indices),
         LayoutMode::Compact => render_compact_body(f, chunks[2], app, indices),
+        LayoutMode::Radar => render_radar_body(f, chunks[2], app, indices),
     }
 
     render_footer(f, chunks[3], app);
@@ -91,6 +93,10 @@ fn render_full_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize])
 
 fn render_compact_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
     render_table(f, area, app, indices);
+}
+
+fn render_radar_body(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
+    render_radar(f, area, app, indices);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
@@ -507,97 +513,19 @@ fn fmt_kbps(value: Option<f64>) -> String {
 
 fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let theme = theme(app.theme_mode);
-    let mut points = Vec::new();
-    let mut sum_lat = 0.0;
-    let mut sum_lon = 0.0;
-    let mut current_points = 0usize;
-
-    for idx in indices {
-        let ac = &app.data.aircraft[*idx];
-        if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
-            points.push((lat, lon, app.is_favorite(ac), true));
-            sum_lat += lat;
-            sum_lon += lon;
-            current_points += 1;
-        }
-        if let Some(trail) = app.trail_for(ac) {
-            for point in trail {
-                points.push((point.lat, point.lon, app.is_favorite(ac), false));
-            }
-        }
-    }
-
-    let mut lines = Vec::new();
-    if points.is_empty() || current_points == 0 {
-        lines.push(Line::from("No position data"));
-    } else {
-        let (center_lat, center_lon) = match app.site() {
-            Some(site) => (site.lat, site.lon),
-            None => (
-                sum_lat / current_points as f64,
-                sum_lon / current_points as f64,
-            ),
-        };
-        let mut max_delta = 0.0001f64;
-        for (lat, lon, _, _) in &points {
-            let dlat = (lat - center_lat).abs();
-            let dlon = (lon - center_lon).abs();
-            max_delta = max_delta.max(dlat.max(dlon));
-        }
-
-        let width = area.width.saturating_sub(2) as usize;
-        let height = area.height.saturating_sub(2) as usize;
-        let width = width.max(1);
-        let height = height.max(1);
-        let mut grid = vec![vec![('.', 0u8); width]; height];
-        let cx = width / 2;
-        let cy = height / 2;
-        set_grid(&mut grid, cx, cy, '+', 1);
-        let sweep_period_ms = 4500u64;
-        let sweep_pos = (now_ms() % sweep_period_ms) as f64 / sweep_period_ms as f64;
-        let sweep_rad = sweep_pos * std::f64::consts::TAU;
-        let max_r = ((width.min(height)) as f64 / 2.0).max(1.0) as usize;
-        for r in 0..=max_r {
-            let x = (cx as f64 + r as f64 * sweep_rad.cos()).round() as isize;
-            let y = (cy as f64 - r as f64 * sweep_rad.sin()).round() as isize;
-            let xi = x.clamp(0, width.saturating_sub(1) as isize) as usize;
-            let yi = y.clamp(0, height.saturating_sub(1) as isize) as usize;
-            set_grid(&mut grid, xi, yi, ':', 0);
-        }
-
-        for (lat, lon, fav, current) in points {
-            let dx = (lon - center_lon) / max_delta;
-            let dy = (lat - center_lat) / max_delta;
-            let x = ((dx + 1.0) * 0.5 * (width.saturating_sub(1)) as f64) as isize;
-            let y = ((1.0 - (dy + 1.0) * 0.5) * (height.saturating_sub(1)) as f64) as isize;
-            let xi = x.clamp(0, width.saturating_sub(1) as isize) as usize;
-            let yi = y.clamp(0, height.saturating_sub(1) as isize) as usize;
-            let (ch, prio) = match (fav, current) {
-                (true, true) => ('F', 4),
-                (false, true) => ('*', 3),
-                (true, false) => ('f', 2),
-                (false, false) => ('o', 2),
-            };
-            set_grid(&mut grid, xi, yi, ch, prio);
-        }
-
-        for row in grid {
-            let line: String = row.into_iter().map(|(ch, _)| ch).collect();
-            lines.push(Line::from(Span::styled(
-                line,
-                Style::default().fg(theme.dim),
-            )));
-        }
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .title("RADAR");
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .style(Style::default().bg(theme.panel_bg));
-    f.render_widget(paragraph, area);
+    let radar_theme = RadarTheme {
+        accent: theme.accent,
+        dim: theme.dim,
+        fav: theme.fav,
+        warn: theme.warn,
+        panel_bg: theme.panel_bg,
+    };
+    let settings = RadarSettings {
+        range_nm: app.radar_range_nm,
+        aspect: app.radar_aspect,
+        renderer: app.radar_renderer,
+    };
+    radar::render(f, area, app, indices, radar_theme, settings);
 }
 
 fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
@@ -928,7 +856,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  w watch  e export  C config  ? help".to_string();
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  m columns  w watch  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -1028,7 +956,8 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )),
         Line::from("  s          Sort (SEEN/ALT/SPD)"),
-        Line::from("  l          Toggle layout"),
+        Line::from("  l          Toggle layout (full/compact/radar)"),
+        Line::from("  R          Radar layout"),
         Line::from("  t          Toggle theme"),
         Line::from("  m          Columns menu"),
         Line::from("  w          Watchlist"),
@@ -1363,9 +1292,9 @@ fn legend_items() -> Vec<&'static str> {
         "  MSG RATE Receiver msg/s (smoothed)",
         "  EST KBPS Estimated kbps (approx)",
         "Radar:",
-        "  *        Current position",
-        "  o        Trail point",
-        "  F/f      Favorite current/trail",
+        "  Canvas   Braille blips with sweep arm",
+        "  * / o    ASCII fallback current/trail",
+        "  F / f    ASCII favorite current/trail",
     ]
 }
 
@@ -1914,16 +1843,6 @@ fn format_duration(duration: Duration) -> String {
     let minutes = (total % 3600) / 60;
     let seconds = total % 60;
     format!("{hours:02}:{minutes:02}:{seconds:02}")
-}
-
-fn set_grid(grid: &mut [Vec<(char, u8)>], x: usize, y: usize, ch: char, prio: u8) {
-    if let Some(row) = grid.get_mut(y) {
-        if let Some(cell) = row.get_mut(x) {
-            if prio >= cell.1 {
-                *cell = (ch, prio);
-            }
-        }
-    }
 }
 
 fn short_source(url: &str) -> String {

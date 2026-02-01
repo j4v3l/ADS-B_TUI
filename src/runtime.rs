@@ -13,7 +13,7 @@ use std::io::{self, Stdout};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, SystemTime};
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, LayoutMode};
 use crate::export;
 use crate::model::ApiResponse;
 use crate::routes::{RouteMessage, RouteRequest};
@@ -122,6 +122,9 @@ pub fn run_app(
                         }
                         KeyCode::Char('t') => app.toggle_theme(),
                         KeyCode::Char('l') => app.toggle_layout(),
+                        KeyCode::Char('R') | KeyCode::Char('r') => {
+                            app.set_layout(LayoutMode::Radar);
+                        }
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
