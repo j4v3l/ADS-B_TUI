@@ -1041,6 +1041,11 @@ log_level = "debug"
 log_file = "adsb-tui.log"
 watchlist_enabled = false
 watchlist_file = "custom-watch.toml"
+radar_range_nm = 250.0
+radar_aspect = 1.2
+radar_renderer = "ascii"
+radar_labels = true
+radar_blip = "block"
 "#;
         fs::write(&path, content).unwrap();
         let cfg = load_file_config(&path).unwrap().unwrap();
@@ -1053,6 +1058,11 @@ watchlist_file = "custom-watch.toml"
         assert_eq!(cfg.log_file.as_deref(), Some("adsb-tui.log"));
         assert_eq!(cfg.watchlist_enabled, Some(false));
         assert_eq!(cfg.watchlist_file.as_deref(), Some("custom-watch.toml"));
+        assert_eq!(cfg.radar_range_nm, Some(250.0));
+        assert_eq!(cfg.radar_aspect, Some(1.2));
+        assert_eq!(cfg.radar_renderer.as_deref(), Some("ascii"));
+        assert_eq!(cfg.radar_labels, Some(true));
+        assert_eq!(cfg.radar_blip.as_deref(), Some("block"));
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(path.parent().unwrap());
     }
@@ -1071,6 +1081,11 @@ watchlist_file = "custom-watch.toml"
             log_file: Some("trace.log".to_string()),
             watchlist_enabled: Some(false),
             watchlist_file: Some("wl.toml".to_string()),
+            radar_range_nm: Some(300.0),
+            radar_aspect: Some(0.1),
+            radar_renderer: Some("ascii".to_string()),
+            radar_labels: Some(true),
+            radar_blip: Some("plane".to_string()),
             ..Default::default()
         };
         apply_file_config(&mut cfg, file);
@@ -1084,5 +1099,10 @@ watchlist_file = "custom-watch.toml"
         assert_eq!(cfg.log_file, "trace.log");
         assert!(!cfg.watchlist_enabled);
         assert_eq!(cfg.watchlist_file, "wl.toml");
+        assert_eq!(cfg.radar_range_nm, 300.0);
+        assert_eq!(cfg.radar_aspect, 0.2);
+        assert_eq!(cfg.radar_renderer, "ascii");
+        assert!(cfg.radar_labels);
+        assert_eq!(cfg.radar_blip, "plane");
     }
 }
