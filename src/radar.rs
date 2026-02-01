@@ -1,14 +1,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line as TextLine, Span};
 use ratatui::widgets::canvas::{Canvas, Circle, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::app::{App, RadarRenderer};
+use crate::app::{App, LayoutMode, RadarRenderer};
 use crate::model::seen_seconds;
 
 const SWEEP_PERIOD_MS: u64 = 4500;
@@ -53,6 +53,12 @@ pub fn render(
     } else {
         render_ascii(f, area, &data, theme);
     }
+
+    if matches!(app.layout_mode, LayoutMode::Radar) {
+        if let Some(selection) = &data.selection {
+            render_selection_panel(f, area, theme, selection);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -67,6 +73,12 @@ struct RadarPoint {
 struct RadarData {
     points: Vec<RadarPoint>,
     range_nm: f64,
+    selection: Option<RadarSelection>,
+}
+
+struct RadarSelection {
+    position: Option<(f64, f64)>,
+    lines: Vec<String>,
 }
 
 fn collect_data(app: &App, indices: &[usize], range_nm: f64) -> Option<RadarData> {
@@ -121,7 +133,13 @@ fn collect_data(app: &App, indices: &[usize], range_nm: f64) -> Option<RadarData
         });
     }
 
-    Some(RadarData { points, range_nm })
+    let selection = selected_aircraft(app, indices, center_lat, center_lon, range_nm);
+
+    Some(RadarData {
+        points,
+        range_nm,
+        selection,
+    })
 }
 
 fn render_empty(f: &mut Frame, area: Rect, theme: RadarTheme) {
@@ -249,6 +267,31 @@ fn render_canvas(
                     color: theme.fav,
                 });
             }
+            if let Some(selection) = &data.selection {
+                if let Some((x, y)) = selection.position {
+                    let marker = (range * 0.02).max(0.5).min(6.0);
+                    ctx.draw(&Circle {
+                        x,
+                        y,
+                        radius: marker,
+                        color: theme.warn,
+                    });
+                    ctx.draw(&CanvasLine {
+                        x1: x - marker,
+                        y1: y,
+                        x2: x + marker,
+                        y2: y,
+                        color: theme.warn,
+                    });
+                    ctx.draw(&CanvasLine {
+                        x1: x,
+                        y1: y - marker,
+                        x2: x,
+                        y2: y + marker,
+                        color: theme.warn,
+                    });
+                }
+            }
         });
     f.render_widget(canvas, area);
 }
@@ -291,6 +334,18 @@ fn render_ascii(f: &mut Frame, area: Rect, data: &RadarData, theme: RadarTheme) 
         set_grid(&mut grid, xi, yi, ch, prio);
     }
 
+    if let Some(selection) = &data.selection {
+        if let Some((x, y)) = selection.position {
+            let dx = x / data.range_nm;
+            let dy = y / data.range_nm;
+            let sx = ((dx + 1.0) * 0.5 * (width.saturating_sub(1)) as f64) as isize;
+            let sy = ((1.0 - (dy + 1.0) * 0.5) * (height.saturating_sub(1)) as f64) as isize;
+            let xi = sx.clamp(0, width.saturating_sub(1) as isize) as usize;
+            let yi = sy.clamp(0, height.saturating_sub(1) as isize) as usize;
+            set_grid(&mut grid, xi, yi, 'X', 5);
+        }
+    }
+
     let mut lines = Vec::with_capacity(height);
     for row in grid {
         let line: String = row.into_iter().map(|(ch, _)| ch).collect();
@@ -308,6 +363,56 @@ fn render_ascii(f: &mut Frame, area: Rect, data: &RadarData, theme: RadarTheme) 
         .block(block)
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, area);
+}
+
+fn render_selection_panel(
+    f: &mut Frame,
+    area: Rect,
+    theme: RadarTheme,
+    selection: &RadarSelection,
+) {
+    if selection.lines.is_empty() || area.width < 12 || area.height < 6 {
+        return;
+    }
+    let mut height = selection.lines.len() as u16 + 2;
+    height = height.min(area.height.saturating_sub(2)).max(6);
+    let mut width = 34u16.min(area.width.saturating_sub(2));
+    if width < 12 {
+        width = area.width.saturating_sub(2).max(12);
+    }
+    let x = area.x.saturating_add(1);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height + 1));
+    let panel = Rect {
+        x,
+        y,
+        width,
+        height,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("TARGET");
+    let mut styled_lines = Vec::new();
+    for (i, line) in selection.lines.iter().enumerate() {
+        let styled = if i == 0 {
+            TextLine::from(Span::styled(
+                line.clone(),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            TextLine::from(Span::raw(line.clone()))
+        };
+        styled_lines.push(styled);
+    }
+    let paragraph = Paragraph::new(styled_lines)
+        .block(block)
+        .style(Style::default().bg(theme.panel_bg))
+        .wrap(Wrap { trim: true });
+    f.render_widget(paragraph, panel);
 }
 
 fn set_grid(grid: &mut [Vec<(char, u8)>], x: usize, y: usize, ch: char, prio: u8) {
@@ -355,4 +460,64 @@ fn bearing_deg(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
         deg += 360.0;
     }
     deg
+}
+
+fn selected_aircraft(
+    app: &App,
+    indices: &[usize],
+    center_lat: f64,
+    center_lon: f64,
+    range_nm: f64,
+) -> Option<RadarSelection> {
+    let selected_idx = app
+        .table_state
+        .selected()
+        .and_then(|row| indices.get(row).copied());
+    let Some(idx) = selected_idx else {
+        return None;
+    };
+    let ac = &app.data.aircraft[idx];
+    let callsign = ac
+        .flight
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("--");
+    let hex = ac.hex.as_deref().unwrap_or("--");
+    let mut lines = Vec::new();
+    lines.push(callsign.to_string());
+    lines.push(format!("HEX      {hex}"));
+
+    let mut position = None;
+    if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
+        let dist = distance_nm(center_lat, center_lon, lat, lon);
+        let brg = bearing_deg(center_lat, center_lon, lat, lon);
+        let dist_text = format!("{dist:.1} nm");
+        let brg_text = format!("{brg:.0}°");
+        lines.push(format!("RNG/BRG  {dist_text} / {brg_text}"));
+        let bearing = brg.to_radians();
+        let x = dist * bearing.sin();
+        let y = dist * bearing.cos();
+        if dist <= range_nm {
+            position = Some((x, y));
+        }
+    } else {
+        lines.push("RNG/BRG  -- / --".to_string());
+    }
+
+    let alt = ac.alt_baro.or(ac.alt_geom);
+    let alt_text = alt.map(|v| format!("{v} ft")).unwrap_or_else(|| "--".to_string());
+    let gs_text = ac.gs.map(|v| format!("{v:.0} kt")).unwrap_or_else(|| "--".to_string());
+    let trk_text = ac
+        .track
+        .map(|v| format!("{v:.0}°"))
+        .unwrap_or_else(|| "--".to_string());
+    let seen_text = seen_seconds(ac)
+        .map(|v| format!("{v:.1}s"))
+        .unwrap_or_else(|| "--".to_string());
+
+    lines.push(format!("ALT/GS  {alt_text} / {gs_text}"));
+    lines.push(format!("TRK/SE  {trk_text} / {seen_text}"));
+
+    Some(RadarSelection { position, lines })
 }

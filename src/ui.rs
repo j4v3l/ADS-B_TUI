@@ -1295,6 +1295,7 @@ fn legend_items() -> Vec<&'static str> {
         "  Canvas   Braille blips with sweep arm",
         "  * / o    ASCII fallback current/trail",
         "  F / f    ASCII favorite current/trail",
+        "  X        Selected target (radar view)",
     ]
 }
 
