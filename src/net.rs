@@ -3,6 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::model::ApiResponse;
+use tracing::{debug, error, info};
 
 pub fn spawn_fetcher(
     url: String,
@@ -13,6 +14,7 @@ pub fn spawn_fetcher(
     tx: Sender<Result<ApiResponse, String>>,
 ) {
     thread::spawn(move || {
+        info!("fetcher started");
         let client = match reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(insecure)
             .timeout(Duration::from_secs(5))
@@ -20,6 +22,7 @@ pub fn spawn_fetcher(
         {
             Ok(client) => client,
             Err(err) => {
+                error!("client error: {err}");
                 let _ = tx.send(Err(format!("Client error: {err}")));
                 return;
             }
@@ -28,6 +31,7 @@ pub fn spawn_fetcher(
         loop {
             let result = fetch_once(&client, &url, api_key.as_deref(), api_key_header.as_deref());
             if tx.send(result).is_err() {
+                debug!("receiver dropped, exiting fetcher");
                 break;
             }
             if refresh > Duration::from_secs(0) {

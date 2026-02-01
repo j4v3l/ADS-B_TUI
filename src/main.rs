@@ -7,6 +7,7 @@ mod routes;
 mod runtime;
 mod storage;
 mod ui;
+mod logging;
 mod watchlist;
 
 use anyhow::Result;
@@ -16,14 +17,19 @@ use std::time::Duration;
 
 use app::{App, LayoutMode, SiteLocation, ThemeMode};
 use config::parse_args;
+use logging::init as init_logging;
 use net::spawn_fetcher;
 use routes::spawn_route_fetcher;
 use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use std::path::PathBuf;
 use storage::{load_favorites, load_watchlist};
+use tracing::{debug, info, warn};
 
 fn main() -> Result<()> {
     let config = parse_args()?;
+    let _log_guard = init_logging(&config);
+    info!("adsb-tui starting");
+    debug!("config path: {}", config.config_path.display());
     let (tx, rx) = mpsc::channel();
 
     let api_key = if config.api_key.trim().is_empty() {
@@ -75,6 +81,8 @@ fn main() -> Result<()> {
         if let Some(path) = watchlist_path.as_ref() {
             if let Ok(entries) = load_watchlist(path) {
                 watchlist = entries;
+            } else {
+                warn!("failed to load watchlist from {}", path.display());
             }
         }
     }
@@ -158,8 +166,10 @@ fn main() -> Result<()> {
     restore_terminal(&mut terminal)?;
 
     if let Err(err) = res {
+        warn!("runtime error: {err}");
         eprintln!("{err}");
     }
 
+    info!("adsb-tui exited");
     Ok(())
 }

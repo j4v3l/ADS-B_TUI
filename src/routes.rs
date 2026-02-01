@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
+use tracing::{debug, error, info};
 
 #[derive(Clone, Debug)]
 pub struct RouteRequest {
@@ -34,6 +35,7 @@ pub fn spawn_route_fetcher(
     rx: Receiver<Vec<RouteRequest>>,
 ) {
     thread::spawn(move || {
+        info!("route fetcher started");
         let client = match reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(insecure)
             .timeout(timeout)
@@ -41,6 +43,7 @@ pub fn spawn_route_fetcher(
         {
             Ok(client) => client,
             Err(err) => {
+                error!("route client error: {err}");
                 let _ = tx.send(RouteMessage::Error(format!("Route client error: {err}")));
                 return;
             }
@@ -52,6 +55,7 @@ pub fn spawn_route_fetcher(
                 fetch_tar1090(&client, &base_url, &route_path)
             } else {
                 if batch.is_empty() {
+                    debug!("route fetch skipped (empty batch)");
                     continue;
                 }
                 fetch_routeset(&client, &base_url, &batch)
@@ -59,9 +63,11 @@ pub fn spawn_route_fetcher(
 
             match result {
                 Ok(results) => {
+                    debug!("route fetch ok: {} results", results.len());
                     let _ = tx.send(RouteMessage::Results(results));
                 }
                 Err(err) => {
+                    error!("route fetch error: {err}");
                     let _ = tx.send(RouteMessage::Error(err));
                 }
             }
