@@ -52,6 +52,7 @@ insecure = false
 | `radar_range_nm` | number | 200.0 | Radar max range in nautical miles |
 | `radar_aspect` | number | 1.0 | Radar Y-axis scale factor for aspect compensation |
 | `radar_renderer` | string | "canvas" | Radar renderer ("canvas", "ascii") |
+| `radar_labels` | boolean | false | Show labels above radar blips (full radar layout) |
 | `ui_fps` | number | 60 | UI refresh rate in frames per second |
 | `smooth_mode` | boolean | true | Enable smooth scrolling |
 | `altitude_trend_arrows` | boolean | true | Show altitude trend arrows |

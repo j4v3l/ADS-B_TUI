@@ -40,6 +40,7 @@ pub const DEFAULT_FLAGS_ENABLED: bool = true;
 pub const DEFAULT_RADAR_RANGE_NM: f64 = 200.0;
 pub const DEFAULT_RADAR_ASPECT: f64 = 1.0;
 pub const DEFAULT_RADAR_RENDERER: &str = "canvas";
+pub const DEFAULT_RADAR_LABELS: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -66,6 +67,7 @@ pub struct Config {
     pub radar_range_nm: f64,
     pub radar_aspect: f64,
     pub radar_renderer: String,
+    pub radar_labels: bool,
     pub site_lat: Option<f64>,
     pub site_lon: Option<f64>,
     pub site_alt_m: Option<f64>,
@@ -118,6 +120,7 @@ struct FileConfig {
     radar_range_nm: Option<f64>,
     radar_aspect: Option<f64>,
     radar_renderer: Option<String>,
+    radar_labels: Option<bool>,
     site_lat: Option<f64>,
     site_lon: Option<f64>,
     site_alt_m: Option<f64>,
@@ -189,6 +192,7 @@ pub fn parse_args() -> Result<Config> {
         radar_range_nm: DEFAULT_RADAR_RANGE_NM,
         radar_aspect: DEFAULT_RADAR_ASPECT,
         radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
+        radar_labels: DEFAULT_RADAR_LABELS,
         site_lat: None,
         site_lon: None,
         site_alt_m: None,
@@ -310,6 +314,9 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_RADAR_RENDERER") {
         config.radar_renderer = value;
+    }
+    if let Ok(value) = env::var("ADSB_RADAR_LABELS") {
+        config.radar_labels = matches!(value.as_str(), "1" | "true" | "yes" | "on");
     }
     if let Ok(value) = env::var("ADSB_SITE_LAT") {
         if let Ok(val) = value.parse::<f64>() {
@@ -552,6 +559,12 @@ pub fn parse_args() -> Result<Config> {
                     .ok_or_else(|| anyhow!("--radar-renderer needs a value"))?
                     .to_string();
             }
+            "--radar-labels" => {
+                config.radar_labels = true;
+            }
+            "--no-radar-labels" => {
+                config.radar_labels = false;
+            }
             "--site-lat" => {
                 let value = iter
                     .next()
@@ -791,6 +804,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(radar_renderer) = file.radar_renderer {
         target.radar_renderer = radar_renderer;
     }
+    if let Some(radar_labels) = file.radar_labels {
+        target.radar_labels = radar_labels;
+    }
     if let Some(site_lat) = file.site_lat {
         target.site_lat = Some(site_lat);
     }
@@ -885,6 +901,7 @@ fn print_help() {
         "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix]"
     );
     println!("       [--radar-range-nm NM] [--radar-aspect RATIO] [--radar-renderer canvas|ascii]");
+    println!("       [--radar-labels] [--no-radar-labels]");
     println!("       [--site-lat LAT] [--site-lon LON] [--site-alt-m METERS]");
     println!("       [--route-base URL] [--route-ttl SECS] [--route-refresh SECS]");
     println!("       [--route-batch N] [--route-timeout SECS] [--route-disable]");
@@ -910,12 +927,13 @@ fn print_help() {
     println!("Environment: ADSB_RATE_WINDOW_MS ADSB_RATE_MIN_SECS control msg rate smoothing");
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
     println!("Environment: ADSB_RADAR_RANGE_NM/ASPECT/RENDERER control radar display");
+    println!("Environment: ADSB_RADAR_LABELS toggles radar blip labels");
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
     println!("Environment: ADSB_TRACK_ARROWS toggles track direction arrows");
     println!("Environment: ADSB_STATS_METRIC_1/2/3 control stats metrics");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
-    println!("      t theme | l layout | R radar | e export csv | E export json");
+    println!("      t theme | l layout | R radar | b labels | e export csv | E export json");
     println!("      C config editor");
 }
 
@@ -962,6 +980,7 @@ mod tests {
             radar_range_nm: DEFAULT_RADAR_RANGE_NM,
             radar_aspect: DEFAULT_RADAR_ASPECT,
             radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
+            radar_labels: DEFAULT_RADAR_LABELS,
             site_lat: None,
             site_lon: None,
             site_alt_m: None,

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::layout::Rect;
@@ -9,11 +10,12 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{App, LayoutMode, RadarRenderer};
-use crate::model::seen_seconds;
+use crate::model::{seen_seconds, Aircraft};
 
 const SWEEP_PERIOD_MS: u64 = 4500;
 const MIN_RANGE_NM: f64 = 1.0;
 const MIN_ASPECT: f64 = 0.2;
+const LABEL_MAX_LEN: usize = 6;
 
 #[derive(Clone, Copy)]
 pub struct RadarTheme {
@@ -39,7 +41,8 @@ pub fn render(
     theme: RadarTheme,
     settings: RadarSettings,
 ) {
-    let data = match collect_data(app, indices, settings.range_nm) {
+    let show_labels = app.radar_labels && matches!(app.layout_mode, LayoutMode::Radar);
+    let data = match collect_data(app, indices, settings.range_nm, show_labels) {
         Some(data) => data,
         None => {
             render_empty(f, area, theme);
@@ -70,10 +73,22 @@ struct RadarPoint {
     seen_secs: Option<f64>,
 }
 
+struct RadarLabel {
+    x: f64,
+    y: f64,
+    text: String,
+    id: String,
+    dist: f64,
+    fav: bool,
+    fresh: bool,
+    selected: bool,
+}
+
 struct RadarData {
     points: Vec<RadarPoint>,
     range_nm: f64,
     selection: Option<RadarSelection>,
+    labels: Vec<RadarLabel>,
 }
 
 struct RadarSelection {
@@ -81,23 +96,62 @@ struct RadarSelection {
     lines: Vec<String>,
 }
 
-fn collect_data(app: &App, indices: &[usize], range_nm: f64) -> Option<RadarData> {
+fn collect_data(
+    app: &App,
+    indices: &[usize],
+    range_nm: f64,
+    collect_labels: bool,
+) -> Option<RadarData> {
+    struct RawPoint {
+        lat: f64,
+        lon: f64,
+        fav: bool,
+        current: bool,
+        seen_secs: Option<f64>,
+        label: Option<LabelInfo>,
+    }
+
+    let selected_id = app
+        .table_state
+        .selected()
+        .and_then(|row| indices.get(row))
+        .and_then(|idx| label_info(&app.data.aircraft[*idx]).map(|info| info.id));
+
     let mut sum_lat = 0.0;
     let mut sum_lon = 0.0;
     let mut current_points = 0usize;
-    let mut raw_points: Vec<(f64, f64, bool, bool, Option<f64>)> = Vec::new();
+    let mut raw_points: Vec<RawPoint> = Vec::new();
 
     for idx in indices {
         let ac = &app.data.aircraft[*idx];
         if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
-            raw_points.push((lat, lon, app.is_favorite(ac), true, seen_seconds(ac)));
+            let label = if collect_labels {
+                label_info(ac)
+            } else {
+                None
+            };
+            raw_points.push(RawPoint {
+                lat,
+                lon,
+                fav: app.is_favorite(ac),
+                current: true,
+                seen_secs: seen_seconds(ac),
+                label,
+            });
             sum_lat += lat;
             sum_lon += lon;
             current_points += 1;
         }
         if let Some(trail) = app.trail_for(ac) {
             for point in trail {
-                raw_points.push((point.lat, point.lon, app.is_favorite(ac), false, None));
+                raw_points.push(RawPoint {
+                    lat: point.lat,
+                    lon: point.lon,
+                    fav: app.is_favorite(ac),
+                    current: false,
+                    seen_secs: None,
+                    label: None,
+                });
             }
         }
     }
@@ -116,21 +170,41 @@ fn collect_data(app: &App, indices: &[usize], range_nm: f64) -> Option<RadarData
 
     let range_nm = range_nm.max(MIN_RANGE_NM);
     let mut points = Vec::with_capacity(raw_points.len());
-    for (lat, lon, fav, current, seen_secs) in raw_points {
-        let dist = distance_nm(center_lat, center_lon, lat, lon);
+    let mut labels = Vec::new();
+    for raw in raw_points {
+        let dist = distance_nm(center_lat, center_lon, raw.lat, raw.lon);
         if dist > range_nm {
             continue;
         }
-        let bearing = bearing_deg(center_lat, center_lon, lat, lon).to_radians();
+        let bearing = bearing_deg(center_lat, center_lon, raw.lat, raw.lon).to_radians();
         let x = dist * bearing.sin();
         let y = dist * bearing.cos();
         points.push(RadarPoint {
             x,
             y,
-            fav,
-            current,
-            seen_secs,
+            fav: raw.fav,
+            current: raw.current,
+            seen_secs: raw.seen_secs,
         });
+        if collect_labels {
+            if let Some(info) = raw.label {
+                let fresh = raw.seen_secs.map(|s| s <= 1.0).unwrap_or(false);
+                let selected = selected_id
+                    .as_ref()
+                    .map(|id| id == &info.id)
+                    .unwrap_or(false);
+                labels.push(RadarLabel {
+                    x,
+                    y,
+                    text: info.text,
+                    id: info.id,
+                    dist,
+                    fav: raw.fav,
+                    fresh,
+                    selected,
+                });
+            }
+        }
     }
 
     let selection = selected_aircraft(app, indices, center_lat, center_lon, range_nm);
@@ -139,6 +213,7 @@ fn collect_data(app: &App, indices: &[usize], range_nm: f64) -> Option<RadarData
         points,
         range_nm,
         selection,
+        labels,
     })
 }
 
@@ -266,6 +341,57 @@ fn render_canvas(
                     coords: &current_fav,
                     color: theme.fav,
                 });
+            }
+            if !data.labels.is_empty() {
+                let label_offset = (range * 0.02).max(0.6).min(5.0);
+                let mut selected_labels = Vec::new();
+                let mut fav_labels = Vec::new();
+                let mut other_labels = Vec::new();
+
+                for label in &data.labels {
+                    if label.selected {
+                        selected_labels.push(label);
+                    } else if label.fav {
+                        fav_labels.push(label);
+                    } else {
+                        other_labels.push(label);
+                    }
+                }
+
+                other_labels.sort_by(|a, b| {
+                    a.dist
+                        .partial_cmp(&b.dist)
+                        .unwrap_or(Ordering::Equal)
+                });
+
+                let max_labels = label_capacity(area);
+                let mut drawn = Vec::new();
+                append_unique_labels(&mut drawn, &selected_labels);
+                append_unique_labels(&mut drawn, &fav_labels);
+                let remaining = max_labels.saturating_sub(drawn.len());
+                if remaining > 0 {
+                    append_unique_labels(&mut drawn, &other_labels[..remaining.min(other_labels.len())]);
+                }
+
+                for label in drawn {
+                    let color = if label.selected {
+                        theme.warn
+                    } else if label.fav {
+                        theme.fav
+                    } else if label.fresh {
+                        theme.accent
+                    } else {
+                        theme.dim
+                    };
+                    ctx.print(
+                        label.x,
+                        label.y + label_offset,
+                        TextLine::from(Span::styled(
+                            label.text.clone(),
+                            Style::default().fg(color),
+                        )),
+                    );
+                }
             }
             if let Some(selection) = &data.selection {
                 if let Some((x, y)) = selection.position {
@@ -415,6 +541,22 @@ fn render_selection_panel(
     f.render_widget(paragraph, panel);
 }
 
+fn label_capacity(area: Rect) -> usize {
+    let width = area.width.saturating_sub(2) as usize;
+    let height = area.height.saturating_sub(2) as usize;
+    let by_width = (width / 10).max(2);
+    let by_height = (height / 3).max(2);
+    by_width.min(by_height).min(12).max(2)
+}
+
+fn append_unique_labels<'a>(target: &mut Vec<&'a RadarLabel>, source: &[&'a RadarLabel]) {
+    for label in source {
+        if !target.iter().any(|existing| existing.id == label.id) {
+            target.push(*label);
+        }
+    }
+}
+
 fn set_grid(grid: &mut [Vec<(char, u8)>], x: usize, y: usize, ch: char, prio: u8) {
     if let Some(row) = grid.get_mut(y) {
         if let Some(cell) = row.get_mut(x) {
@@ -460,6 +602,37 @@ fn bearing_deg(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
         deg += 360.0;
     }
     deg
+}
+
+struct LabelInfo {
+    id: String,
+    text: String,
+}
+
+fn label_info(ac: &Aircraft) -> Option<LabelInfo> {
+    let callsign = ac
+        .flight
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    if let Some(value) = callsign {
+        let clean = value.to_ascii_uppercase();
+        return Some(LabelInfo {
+            id: clean.clone(),
+            text: truncate_text(&clean, LABEL_MAX_LEN),
+        });
+    }
+    let hex = ac.hex.as_deref().map(str::trim).filter(|v| !v.is_empty())?;
+    let id = hex.to_ascii_lowercase();
+    let text = truncate_text(&id.to_ascii_uppercase(), LABEL_MAX_LEN);
+    Some(LabelInfo { id, text })
+}
+
+fn truncate_text(value: &str, max_len: usize) -> String {
+    if max_len == 0 {
+        return value.to_string();
+    }
+    value.chars().take(max_len).collect()
 }
 
 fn selected_aircraft(

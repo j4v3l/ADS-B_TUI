@@ -856,7 +856,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  m columns  w watch  e export  C config  ? help".to_string();
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  b labels  m columns  w watch  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -958,6 +958,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  s          Sort (SEEN/ALT/SPD)"),
         Line::from("  l          Toggle layout (full/compact/radar)"),
         Line::from("  R          Radar layout"),
+        Line::from("  b          Toggle radar labels"),
         Line::from("  t          Toggle theme"),
         Line::from("  m          Columns menu"),
         Line::from("  w          Watchlist"),

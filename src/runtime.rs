@@ -125,6 +125,9 @@ pub fn run_app(
                         KeyCode::Char('R') | KeyCode::Char('r') => {
                             app.set_layout(LayoutMode::Radar);
                         }
+                        KeyCode::Char('b') | KeyCode::Char('B') => {
+                            app.toggle_radar_labels();
+                        }
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),

@@ -142,6 +142,7 @@ fn main() -> Result<()> {
             config.radar_range_nm,
             config.radar_aspect,
             radar_renderer,
+            config.radar_labels,
             config.route_enabled,
             config.route_mode.eq_ignore_ascii_case("tar1090"),
             Duration::from_secs(config.route_ttl_secs),
