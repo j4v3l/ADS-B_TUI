@@ -219,6 +219,7 @@ pub struct RouteInfo {
 struct AircraftRate {
     last_messages: u64,
     last_time: SystemTime,
+    last_rate_time: SystemTime,
     ema: Option<f64>,
     rate: Option<f64>,
 }
@@ -296,6 +297,9 @@ pub struct App {
     msg_samples: VecDeque<(SystemTime, u64)>,
     aircraft_rates: HashMap<String, AircraftRate>,
     avg_aircraft_rate: Option<f64>,
+    total_aircraft_rate: Option<f64>,
+    total_aircraft_rate_ema: Option<f64>,
+    total_aircraft_rate_time: Option<SystemTime>,
     pub(crate) notify_radius_mi: f64,
     pub(crate) overpass_mi: f64,
     pub(crate) notify_cooldown: Duration,
@@ -443,6 +447,9 @@ impl App {
             msg_samples: VecDeque::new(),
             aircraft_rates: HashMap::new(),
             avg_aircraft_rate: None,
+            total_aircraft_rate: None,
+            total_aircraft_rate_ema: None,
+            total_aircraft_rate_time: None,
             notify_radius_mi: notify_radius_mi.max(0.1),
             overpass_mi: overpass_mi.max(0.05),
             notify_cooldown: if notify_cooldown.is_zero() {
@@ -465,7 +472,9 @@ impl App {
     }
 
     pub fn apply_update(&mut self, data: ApiResponse) {
-        let now_time = SystemTime::now();
+        let now_time = data.now
+            .and_then(|n| if n > 0 { Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64)) } else { None })
+            .unwrap_or_else(SystemTime::now);
         self.update_rate(&data, now_time);
         self.update_aircraft_rates(&data, now_time);
         self.update_seen_times(&data, now_time);
@@ -1075,7 +1084,22 @@ impl App {
     }
 
     pub fn msg_rate_display(&self) -> Option<f64> {
-        self.msg_rate.or(self.msg_rate_display)
+        let now = SystemTime::now();
+        let global_recent = self
+            .last_msg_time
+            .and_then(|t| now.duration_since(t).ok())
+            .map(|d| d <= self.msg_rate_window + self.msg_rate_window)
+            .unwrap_or(false);
+
+        if global_recent {
+            self.msg_rate
+                .or(self.msg_rate_display)
+                .or(self.total_aircraft_rate)
+        } else {
+            self.total_aircraft_rate
+                .or(self.msg_rate)
+                .or(self.msg_rate_display)
+        }
     }
 
     pub fn avg_aircraft_rate(&self) -> Option<f64> {
@@ -1225,20 +1249,16 @@ impl App {
     }
 
     fn update_rate(&mut self, data: &ApiResponse, now_time: SystemTime) {
-        let hold = {
-            let mut value = self.msg_rate_window + self.msg_rate_window;
-            if value < Duration::from_secs(2) {
-                value = Duration::from_secs(2);
-            }
-            value
-        };
-
         if let Some(messages) = data.messages {
             if let Some(last_total) = self.last_msg_total {
                 if messages < last_total {
                     self.msg_samples.clear();
                     self.msg_rate_ema = None;
                     self.msg_rate_display = None;
+                }
+                if messages == last_total {
+                    self.apply_rate_decay(now_time);
+                    return;
                 }
             }
 
@@ -1303,18 +1323,7 @@ impl App {
             };
 
             if inst <= 0.0 {
-                if let Some(last) = self.msg_rate_last_display {
-                    if now_time
-                        .duration_since(last)
-                        .map(|d| d < hold)
-                        .unwrap_or(true)
-                    {
-                        return;
-                    }
-                }
-                self.msg_rate = None;
-                self.msg_rate_ema = None;
-                self.msg_rate_display = None;
+                self.apply_rate_decay(now_time);
                 return;
             }
 
@@ -1330,10 +1339,33 @@ impl App {
         // Keep the last known rate indefinitely
     }
 
+    fn apply_rate_decay(&mut self, now_time: SystemTime) {
+        let Some(prev) = self.msg_rate_ema else {
+            return;
+        };
+        let last = self.last_msg_time.unwrap_or(now_time);
+        let dt = now_time
+            .duration_since(last)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let hold = self.msg_rate_window.as_secs_f64().max(2.0);
+        if dt <= hold {
+            return;
+        }
+        let tau = (self.msg_rate_window.as_secs_f64() * 4.0).max(3.0);
+        let decay = (-dt / tau).exp();
+        let ema = (prev * decay).max(0.0);
+        self.msg_rate_ema = Some(ema);
+        self.msg_rate = Some(ema);
+        self.msg_rate_display = Some(ema);
+    }
+
     fn update_aircraft_rates(&mut self, data: &ApiResponse, now_time: SystemTime) {
         let mut present = HashSet::new();
         let mut sum = 0.0;
         let mut count = 0usize;
+        let mut total_delta_msgs: u64 = 0;
+        let max_age = self.msg_rate_window + self.msg_rate_window;
 
         for ac in &data.aircraft {
             let key = if let Some(hex) = ac.hex.as_deref() {
@@ -1355,6 +1387,7 @@ impl App {
                 .or_insert_with(|| AircraftRate {
                     last_messages: messages,
                     last_time: now_time,
+                    last_rate_time: now_time,
                     ema: None,
                     rate: None,
                 });
@@ -1362,8 +1395,15 @@ impl App {
             if messages < entry.last_messages {
                 entry.ema = None;
                 entry.rate = None;
+                entry.last_messages = messages;
+                entry.last_time = now_time;
+                entry.last_rate_time = now_time;
             } else if messages > entry.last_messages {
                 if let Ok(delta_t) = now_time.duration_since(entry.last_time) {
+                    if delta_t <= max_age {
+                        total_delta_msgs =
+                            total_delta_msgs.saturating_add(messages - entry.last_messages);
+                    }
                     let secs = delta_t.as_secs_f64().max(self.msg_rate_min_secs);
                     let inst = (messages - entry.last_messages) as f64 / secs;
                     let ema = match entry.ema {
@@ -1373,10 +1413,30 @@ impl App {
                     entry.ema = Some(ema);
                     entry.rate = Some(ema);
                 }
+                entry.last_messages = messages;
+                entry.last_time = now_time;
+                entry.last_rate_time = now_time;
+            } else if let Some(prev) = entry.ema {
+                let since_change = now_time
+                    .duration_since(entry.last_time)
+                    .map(|d| d.as_secs_f64())
+                    .unwrap_or(0.0);
+                let hold = self.msg_rate_window.as_secs_f64().max(2.0);
+                if since_change > hold {
+                    let dt = now_time
+                        .duration_since(entry.last_rate_time)
+                        .map(|d| d.as_secs_f64())
+                        .unwrap_or(0.0);
+                    if dt > 0.0 {
+                        let tau = (self.msg_rate_window.as_secs_f64() * 4.0).max(3.0);
+                        let decay = (-dt / tau).exp();
+                        let ema = (prev * decay).max(0.0);
+                        entry.ema = Some(ema);
+                        entry.rate = Some(ema);
+                        entry.last_rate_time = now_time;
+                    }
+                }
             }
-
-            entry.last_messages = messages;
-            entry.last_time = now_time;
 
             if let Some(rate) = entry.rate {
                 sum += rate;
@@ -1390,6 +1450,45 @@ impl App {
         } else {
             None
         };
+
+        self.update_total_aircraft_rate(total_delta_msgs, now_time);
+    }
+
+    fn update_total_aircraft_rate(&mut self, delta_msgs: u64, now_time: SystemTime) {
+        let hold = self.msg_rate_window.as_secs_f64().max(2.0);
+        let tau = (self.msg_rate_window.as_secs_f64() * 4.0).max(3.0);
+        if delta_msgs > 0 {
+            let last_time = self.total_aircraft_rate_time.unwrap_or(now_time);
+            let secs = now_time
+                .duration_since(last_time)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(self.msg_rate_min_secs)
+                .max(self.msg_rate_min_secs);
+            let inst = delta_msgs as f64 / secs;
+            let ema = match self.total_aircraft_rate_ema {
+                Some(prev) => 0.45 * inst + 0.55 * prev,
+                None => inst,
+            };
+            self.total_aircraft_rate_ema = Some(ema);
+            self.total_aircraft_rate = Some(ema);
+            self.total_aircraft_rate_time = Some(now_time);
+            return;
+        }
+
+        if let Some(prev) = self.total_aircraft_rate_ema {
+            let last_time = self.total_aircraft_rate_time.unwrap_or(now_time);
+            let since = now_time
+                .duration_since(last_time)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            if since > hold {
+                let decay = (-since / tau).exp();
+                let ema = (prev * decay).max(0.0);
+                self.total_aircraft_rate_ema = Some(ema);
+                self.total_aircraft_rate = Some(ema);
+                self.total_aircraft_rate_time = Some(now_time);
+            }
+        }
     }
 
     fn update_seen_times(&mut self, data: &ApiResponse, now_time: SystemTime) {
