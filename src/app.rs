@@ -289,6 +289,8 @@ pub struct App {
     pub(crate) route_last_poll: Option<SystemTime>,
     pub(crate) route_cache: HashMap<String, RouteInfo>,
     pub(crate) route_last_request: HashMap<String, SystemTime>,
+    pub(crate) route_backoff_until: Option<SystemTime>,
+    pub(crate) route_backoff_attempts: u32,
     pub(crate) msg_rate: Option<f64>,
     msg_rate_display: Option<f64>,
     msg_rate_ema: Option<f64>,
@@ -435,6 +437,8 @@ impl App {
             route_last_poll: None,
             route_cache: HashMap::new(),
             route_last_request: HashMap::new(),
+            route_backoff_until: None,
+            route_backoff_attempts: 0,
             msg_rate: None,
             msg_rate_display: None,
             msg_rate_ema: None,
@@ -1153,6 +1157,12 @@ impl App {
     }
 
     pub fn route_refresh_due(&mut self, now: SystemTime) -> bool {
+        if let Some(until) = self.route_backoff_until {
+            if now.duration_since(until).is_err() {
+                return false;
+            }
+            self.route_backoff_until = None;
+        }
         if self.route_refresh.as_secs() == 0 && self.route_refresh.subsec_nanos() == 0 {
             return true;
         }
@@ -1184,10 +1194,14 @@ impl App {
             );
         }
         self.route_error = None;
+        self.route_backoff_until = None;
+        self.route_backoff_attempts = 0;
     }
 
     pub fn set_route_error(&mut self, message: String) {
-        self.route_error = Some((message, SystemTime::now()));
+        let now = SystemTime::now();
+        self.route_error = Some((message.clone(), now));
+        self.note_route_failure(&message, now);
     }
 
     pub fn collect_route_requests(
@@ -1239,6 +1253,21 @@ impl App {
             });
         }
         requests
+    }
+
+    fn note_route_failure(&mut self, message: &str, now: SystemTime) {
+        if !is_rate_limited_message(message) {
+            return;
+        }
+        self.route_backoff_attempts = self.route_backoff_attempts.saturating_add(1);
+        let backoff = route_backoff_duration(self.route_backoff_attempts);
+        self.route_backoff_until = Some(now + backoff);
+        debug!(
+            "route backoff {}s (attempt {}) due to {}",
+            backoff.as_secs(),
+            self.route_backoff_attempts,
+            message
+        );
     }
 
     pub fn start_filter(&mut self) {
@@ -1754,6 +1783,23 @@ fn normalize_callsign(value: &str) -> String {
 
 fn normalize_text(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn is_rate_limited_message(message: &str) -> bool {
+    let msg = message.to_ascii_lowercase();
+    msg.contains(" 429")
+        || msg.contains("429 ")
+        || msg.contains("too many requests")
+        || msg.contains("rate limit")
+}
+
+fn route_backoff_duration(attempts: u32) -> Duration {
+    if attempts == 0 {
+        return Duration::from_secs(0);
+    }
+    let shift = attempts.saturating_sub(1).min(7);
+    let secs = 2u64.saturating_mul(1u64 << shift);
+    Duration::from_secs(secs.min(300))
 }
 
 fn match_text(needle: &str, haystack: &str, mode: &str) -> bool {

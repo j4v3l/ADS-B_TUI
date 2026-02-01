@@ -106,7 +106,12 @@ fn fetch_routeset(
     for payload in payloads {
         match post_payload(client, &url, &payload) {
             Ok(body) => return Ok(parse_routes(body)),
-            Err(err) => last_err = Some(err),
+            Err(err) => {
+                if is_rate_limited_message(&err) {
+                    return Err(err);
+                }
+                last_err = Some(err)
+            }
         }
     }
 
@@ -148,6 +153,14 @@ fn post_payload(
     }
     let body: Value = resp.json::<Value>().map_err(|err| err.to_string())?;
     Ok(body)
+}
+
+fn is_rate_limited_message(message: &str) -> bool {
+    let msg = message.to_ascii_lowercase();
+    msg.contains(" 429")
+        || msg.contains("429 ")
+        || msg.contains("too many requests")
+        || msg.contains("rate limit")
 }
 
 fn parse_routes(body: Value) -> Vec<RouteResult> {
