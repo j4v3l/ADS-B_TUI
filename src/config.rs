@@ -930,7 +930,7 @@ fn print_help() {
     println!("       [--log] [--no-log] [--log-level LEVEL] [--log-file PATH]");
     println!("       [--stale SECONDS] [--hide-stale] [--show-stale] [--low-nic N] [--low-nac N]");
     println!(
-        "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix]"
+        "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix|mono]"
     );
     println!("       [--radar-range-nm NM] [--radar-aspect RATIO] [--radar-renderer canvas|ascii]");
     println!("       [--radar-blip dot|block|plane]");

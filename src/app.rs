@@ -123,6 +123,7 @@ pub enum ThemeMode {
     Amber,
     Ocean,
     Matrix,
+    Monochrome,
 }
 
 impl ThemeMode {
@@ -132,7 +133,8 @@ impl ThemeMode {
             ThemeMode::ColorBlind => ThemeMode::Amber,
             ThemeMode::Amber => ThemeMode::Ocean,
             ThemeMode::Ocean => ThemeMode::Matrix,
-            ThemeMode::Matrix => ThemeMode::Default,
+            ThemeMode::Matrix => ThemeMode::Monochrome,
+            ThemeMode::Monochrome => ThemeMode::Default,
         }
     }
 
@@ -143,6 +145,7 @@ impl ThemeMode {
             ThemeMode::Amber => "AMBER",
             ThemeMode::Ocean => "OCEAN",
             ThemeMode::Matrix => "MATRIX",
+            ThemeMode::Monochrome => "MONO",
         }
     }
 
@@ -152,6 +155,7 @@ impl ThemeMode {
             "amber" | "gold" => ThemeMode::Amber,
             "ocean" | "blue" => ThemeMode::Ocean,
             "matrix" | "green" => ThemeMode::Matrix,
+            "mono" | "monochrome" | "bw" | "grayscale" => ThemeMode::Monochrome,
             _ => ThemeMode::Default,
         }
     }
