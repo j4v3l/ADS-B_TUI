@@ -757,3 +757,64 @@ fn selected_aircraft(
 
     Some(RadarSelection { position, lines })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Aircraft;
+
+    #[test]
+    fn direction_glyph_maps_cardinals() {
+        assert_eq!(direction_glyph(0.0), "↑");
+        assert_eq!(direction_glyph(45.0), "↗");
+        assert_eq!(direction_glyph(90.0), "→");
+        assert_eq!(direction_glyph(135.0), "↘");
+        assert_eq!(direction_glyph(180.0), "↓");
+        assert_eq!(direction_glyph(225.0), "↙");
+        assert_eq!(direction_glyph(270.0), "←");
+        assert_eq!(direction_glyph(315.0), "↖");
+        assert_eq!(direction_glyph(360.0), "↑");
+    }
+
+    #[test]
+    fn label_info_prefers_callsign() {
+        let ac = Aircraft {
+            flight: Some("aal123".to_string()),
+            hex: Some("ab12cd".to_string()),
+            ..Default::default()
+        };
+        let info = label_info(&ac).expect("label info");
+        assert_eq!(info.id, "AAL123");
+        assert_eq!(info.text, "AAL123");
+    }
+
+    #[test]
+    fn label_info_falls_back_to_hex() {
+        let ac = Aircraft {
+            flight: None,
+            hex: Some("ab12cd".to_string()),
+            ..Default::default()
+        };
+        let info = label_info(&ac).expect("label info");
+        assert_eq!(info.id, "ab12cd");
+        assert_eq!(info.text, "AB12CD");
+    }
+
+    #[test]
+    fn label_info_truncates() {
+        let ac = Aircraft {
+            flight: Some("LONGCALLSIGN".to_string()),
+            hex: None,
+            ..Default::default()
+        };
+        let info = label_info(&ac).expect("label info");
+        assert_eq!(info.text.len(), LABEL_MAX_LEN);
+        assert_eq!(info.text, "LONGCA");
+    }
+
+    #[test]
+    fn blip_glyph_plane_uses_heading() {
+        assert_eq!(blip_glyph(RadarBlip::Plane, Some(90.0)), "→");
+        assert_eq!(blip_glyph(RadarBlip::Plane, None), "✈");
+    }
+}

@@ -2485,7 +2485,7 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 mod tests {
     use super::{
         compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches, App,
-        ConfigKind, RouteInfo, TrendDir, WatchEntry,
+        ConfigKind, RadarBlip, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
     };
     use crate::model::Aircraft;
     use std::collections::HashSet;
@@ -2691,5 +2691,21 @@ mod tests {
     fn distance_same_point_is_zero() {
         let dist = distance_mi(26.0, -80.0, 26.0, -80.0);
         assert!(dist.abs() < 0.0001);
+    }
+
+    #[test]
+    fn radar_blip_parses() {
+        assert_eq!(RadarBlip::from_str("dot"), RadarBlip::Dot);
+        assert_eq!(RadarBlip::from_str("block"), RadarBlip::Block);
+        assert_eq!(RadarBlip::from_str("cube"), RadarBlip::Block);
+        assert_eq!(RadarBlip::from_str("plane"), RadarBlip::Plane);
+        assert_eq!(RadarBlip::from_str("aircraft"), RadarBlip::Plane);
+    }
+
+    #[test]
+    fn radar_renderer_parses() {
+        assert_eq!(RadarRenderer::from_str("ascii"), RadarRenderer::Ascii);
+        assert_eq!(RadarRenderer::from_str("canvas"), RadarRenderer::Canvas);
+        assert_eq!(RadarRenderer::from_str("other"), RadarRenderer::Canvas);
     }
 }
