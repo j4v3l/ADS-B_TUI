@@ -62,7 +62,7 @@ impl LayoutMode {
     pub fn toggle(self) -> Self {
         match self {
             LayoutMode::Full => LayoutMode::Compact,
-            LayoutMode::Compact => LayoutMode::Radar,
+            LayoutMode::Compact => LayoutMode::Full,
             LayoutMode::Radar => LayoutMode::Full,
         }
     }

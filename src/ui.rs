@@ -958,7 +958,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )),
         Line::from("  s          Sort (SEEN/ALT/SPD)"),
-        Line::from("  l          Toggle layout (full/compact/radar)"),
+        Line::from("  l          Toggle layout (full/compact)"),
         Line::from("  R          Radar layout"),
         Line::from("  b          Toggle radar labels"),
         Line::from("  t          Toggle theme"),
