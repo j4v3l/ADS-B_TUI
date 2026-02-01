@@ -518,12 +518,14 @@ fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         dim: theme.dim,
         fav: theme.fav,
         warn: theme.warn,
+        highlight: theme.highlight_bg,
         panel_bg: theme.panel_bg,
     };
     let settings = RadarSettings {
         range_nm: app.radar_range_nm,
         aspect: app.radar_aspect,
         renderer: app.radar_renderer,
+        blip: app.radar_blip,
     };
     radar::render(f, area, app, indices, radar_theme, settings);
 }

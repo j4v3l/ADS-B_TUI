@@ -100,6 +100,23 @@ impl RadarRenderer {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadarBlip {
+    Dot,
+    Block,
+    Plane,
+}
+
+impl RadarBlip {
+    pub fn from_str(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "plane" | "airplane" | "aircraft" => RadarBlip::Plane,
+            "block" | "cube" | "solid" => RadarBlip::Block,
+            _ => RadarBlip::Dot,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeMode {
     Default,
     ColorBlind,
@@ -292,6 +309,7 @@ pub struct App {
     pub(crate) radar_aspect: f64,
     pub(crate) radar_renderer: RadarRenderer,
     pub(crate) radar_labels: bool,
+    pub(crate) radar_blip: RadarBlip,
     pub(crate) columns: Vec<ColumnConfig>,
     pub(crate) column_cursor: usize,
     pub(crate) smooth_mode: bool,
@@ -364,6 +382,7 @@ impl App {
         radar_aspect: f64,
         radar_renderer: RadarRenderer,
         radar_labels: bool,
+        radar_blip: RadarBlip,
         route_enabled: bool,
         route_tar1090: bool,
         route_ttl: Duration,
@@ -440,6 +459,7 @@ impl App {
             radar_aspect: radar_aspect.max(0.2),
             radar_renderer,
             radar_labels,
+            radar_blip,
             columns: {
                 let mut cols = default_columns();
                 if let Some(flag_col) = cols.iter_mut().find(|c| c.id == ColumnId::Flag) {
@@ -2271,6 +2291,11 @@ fn default_config_items() -> Vec<ConfigItem> {
         ConfigKind::Bool,
         config::DEFAULT_RADAR_LABELS.to_string(),
     );
+    push_item(
+        "radar_blip",
+        ConfigKind::Str,
+        config::DEFAULT_RADAR_BLIP.to_string(),
+    );
     push_item("site_lat", ConfigKind::Float, "".to_string());
     push_item("site_lon", ConfigKind::Float, "".to_string());
     push_item("site_alt_m", ConfigKind::Float, "".to_string());
@@ -2606,6 +2631,7 @@ mod tests {
             1.0,
             crate::app::RadarRenderer::Canvas,
             false,
+            crate::app::RadarBlip::Dot,
             false,
             false,
             Duration::from_secs(1),
