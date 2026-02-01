@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 use toml::Value;
 use toml_edit::DocumentMut;
+use tracing::{debug, info, trace, warn};
 
 use crate::config;
 use crate::storage;
@@ -472,6 +473,11 @@ impl App {
     }
 
     pub fn apply_update(&mut self, data: ApiResponse) {
+        debug!(
+            "apply_update aircraft={} messages={:?}",
+            data.aircraft.len(),
+            data.messages
+        );
         let now_time = data.now
             .and_then(|n| if n > 0 { Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64)) } else { None })
             .unwrap_or_else(SystemTime::now);
@@ -492,6 +498,7 @@ impl App {
     }
 
     pub fn apply_error(&mut self, msg: String) {
+        warn!("apply_error: {msg}");
         self.last_error = Some(msg);
     }
 
@@ -528,53 +535,65 @@ impl App {
 
     pub fn toggle_sort(&mut self) {
         self.sort = self.sort.next();
+        debug!("sort mode -> {}", self.sort.label());
     }
 
     pub fn toggle_theme(&mut self) {
         self.theme_mode = self.theme_mode.toggle();
+        debug!("theme -> {}", self.theme_mode.label());
     }
 
     pub fn toggle_layout(&mut self) {
         self.layout_mode = self.layout_mode.toggle();
+        debug!("layout -> {}", self.layout_mode.label());
     }
 
     pub fn open_columns(&mut self) {
         self.input_mode = InputMode::Columns;
+        debug!("open columns");
     }
 
     pub fn close_columns(&mut self) {
         self.input_mode = InputMode::Normal;
+        debug!("close columns");
     }
 
     pub fn open_help(&mut self) {
         self.input_mode = InputMode::Help;
+        debug!("open help");
     }
 
     pub fn close_help(&mut self) {
         self.input_mode = InputMode::Normal;
+        debug!("close help");
     }
 
     pub fn open_legend(&mut self) {
         self.config_cursor = 0;
         self.input_mode = InputMode::Legend;
+        debug!("open legend");
     }
 
     pub fn close_legend(&mut self) {
         self.input_mode = InputMode::Help;
+        debug!("close legend");
     }
 
     pub fn open_watchlist(&mut self) {
         self.watchlist_cursor = 0;
         self.input_mode = InputMode::Watchlist;
+        debug!("open watchlist");
     }
 
     pub fn close_watchlist(&mut self) {
         self.input_mode = InputMode::Normal;
+        debug!("close watchlist");
     }
 
     pub fn save_watchlist(&mut self) {
         let now = SystemTime::now();
         let Some(path) = self.watchlist_path.as_ref() else {
+            warn!("watchlist save skipped: no file path");
             self.notifications.push(Notification {
                 message: "WATCHLIST no file path".to_string(),
                 at: now,
@@ -582,22 +601,30 @@ impl App {
             return;
         };
         match storage::save_watchlist(path, &self.watchlist) {
-            Ok(_) => self.notifications.push(Notification {
-                message: "WATCHLIST saved".to_string(),
-                at: now,
-            }),
-            Err(err) => self.notifications.push(Notification {
-                message: format!("WATCHLIST ERR {err}"),
-                at: now,
-            }),
+            Ok(_) => {
+                info!("watchlist saved {}", path.display());
+                self.notifications.push(Notification {
+                    message: "WATCHLIST saved".to_string(),
+                    at: now,
+                });
+            }
+            Err(err) => {
+                warn!("watchlist save failed: {err}");
+                self.notifications.push(Notification {
+                    message: format!("WATCHLIST ERR {err}"),
+                    at: now,
+                });
+            }
         }
     }
 
     pub fn toggle_watchlist_enabled_selected(&mut self) -> bool {
         if let Some(entry) = self.watchlist.get_mut(self.watchlist_cursor) {
+            let entry_id = entry.entry_id();
             let next = !entry.is_enabled();
             entry.enabled = Some(next);
             self.save_watchlist();
+            debug!("watchlist {} enabled={}", entry_id, next);
             return true;
         }
         false
@@ -605,9 +632,11 @@ impl App {
 
     pub fn toggle_watchlist_notify_selected(&mut self) -> bool {
         if let Some(entry) = self.watchlist.get_mut(self.watchlist_cursor) {
+            let entry_id = entry.entry_id();
             let next = !entry.notify_enabled();
             entry.notify = Some(next);
             self.save_watchlist();
+            debug!("watchlist {} notify={}", entry_id, next);
             return true;
         }
         false
@@ -617,6 +646,10 @@ impl App {
         if self.watchlist.is_empty() {
             return false;
         }
+        let entry_id = self
+            .watchlist
+            .get(self.watchlist_cursor)
+            .map(|entry| entry.entry_id());
         if self.watchlist_cursor >= self.watchlist.len() {
             self.watchlist_cursor = self.watchlist.len() - 1;
         }
@@ -625,6 +658,9 @@ impl App {
             self.watchlist_cursor = self.watchlist.len() - 1;
         }
         self.save_watchlist();
+        if let Some(entry_id) = entry_id {
+            debug!("watchlist delete {}", entry_id);
+        }
         true
     }
 
@@ -672,12 +708,14 @@ impl App {
         self.config_edit.clear();
         self.config_status = None;
         self.input_mode = InputMode::Config;
+        debug!("open config items={}", self.config_items.len());
     }
 
     pub fn close_config(&mut self) {
         self.input_mode = InputMode::Normal;
         self.config_editing = false;
         self.config_edit.clear();
+        debug!("close config");
     }
 
     pub fn next_config_item(&mut self) {
@@ -702,12 +740,14 @@ impl App {
         if let Some(item) = self.config_items.get(self.config_cursor) {
             self.config_edit = item.value.clone();
             self.config_editing = true;
+            debug!("config edit start key={}", item.key);
         }
     }
 
     pub fn cancel_config_edit(&mut self) {
         self.config_editing = false;
         self.config_edit.clear();
+        debug!("config edit cancel");
     }
 
     pub fn apply_config_edit(&mut self) {
@@ -716,6 +756,7 @@ impl App {
         }
         self.config_editing = false;
         self.config_edit.clear();
+        debug!("config edit applied");
     }
 
     pub fn push_config_char(&mut self, ch: char) {
@@ -741,6 +782,7 @@ impl App {
                     doc.remove(item.key.as_str());
                 }
                 Err(err) => {
+                    warn!("config save failed: {err}");
                     self.config_status = Some((err, SystemTime::now()));
                     return;
                 }
@@ -749,8 +791,10 @@ impl App {
 
         let text = doc.to_string();
         if let Err(err) = fs::write(&self.config_path, text) {
+            warn!("config save failed: {err}");
             self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
         } else {
+            info!("config saved {}", self.config_path.display());
             self.config_status = Some((
                 format!("saved {} (restart to apply)", self.config_path.display()),
                 SystemTime::now(),
@@ -806,6 +850,7 @@ impl App {
                 return;
             }
             col.visible = !col.visible;
+            debug!("column {} visible={}", col.label, col.visible);
         }
     }
 
@@ -1015,6 +1060,7 @@ impl App {
                 if !self.favorites.insert(key.clone()) {
                     self.favorites.remove(&key);
                 }
+                debug!("favorite toggle {}", key);
                 return true;
             }
         }
@@ -1198,20 +1244,24 @@ impl App {
     pub fn start_filter(&mut self) {
         self.filter_edit = self.filter.clone();
         self.input_mode = InputMode::Filter;
+        debug!("filter edit start");
     }
 
     pub fn apply_filter(&mut self) {
         self.filter = self.filter_edit.trim().to_string();
         self.input_mode = InputMode::Normal;
+        debug!("filter applied len={}", self.filter.len());
     }
 
     pub fn cancel_filter(&mut self) {
         self.filter_edit.clear();
         self.input_mode = InputMode::Normal;
+        debug!("filter edit cancel");
     }
 
     pub fn clear_filter(&mut self) {
         self.filter.clear();
+        debug!("filter cleared");
     }
 
     pub fn push_filter_char(&mut self, ch: char) {
@@ -1335,6 +1385,7 @@ impl App {
             self.msg_rate = Some(ema);
             self.msg_rate_display = Some(ema);
             self.msg_rate_last_display = Some(now_time);
+            trace!("msg_rate inst={inst:.2} ema={ema:.2}");
         }
         // Keep the last known rate indefinitely
     }
@@ -1596,6 +1647,7 @@ impl App {
                 "NEAR"
             };
             let message = format!("{prefix} {callsign} {reg} {dist_mi:.1}mi");
+            debug!("notify {message}");
             self.notifications.push(Notification { message, at: now });
         }
 
@@ -1651,6 +1703,7 @@ impl App {
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or(entry_id.as_str());
             let message = format!("WATCH {label} {callsign} {reg}");
+            debug!("notify {message}");
             self.notifications.push(Notification { message, at: now });
         }
 
@@ -2073,6 +2126,9 @@ fn default_config_items() -> Vec<ConfigItem> {
         ConfigKind::Str,
         config::DEFAULT_API_KEY_HEADER.to_string(),
     );
+    push_item("log_enabled", ConfigKind::Bool, "false".to_string());
+    push_item("log_level", ConfigKind::Str, "info".to_string());
+    push_item("log_file", ConfigKind::Str, "adsb-tui.log".to_string());
     push_item(
         "watchlist_enabled",
         ConfigKind::Bool,

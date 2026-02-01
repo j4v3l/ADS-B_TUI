@@ -54,6 +54,9 @@ pub struct Config {
     pub watchlist_file: String,
     pub api_key: String,
     pub api_key_header: String,
+    pub log_enabled: bool,
+    pub log_level: String,
+    pub log_file: String,
     pub filter: String,
     pub layout: String,
     pub theme: String,
@@ -100,6 +103,9 @@ struct FileConfig {
     watchlist_file: Option<String>,
     api_key: Option<String>,
     api_key_header: Option<String>,
+    log_enabled: Option<bool>,
+    log_level: Option<String>,
+    log_file: Option<String>,
     filter: Option<String>,
     layout: Option<String>,
     theme: Option<String>,
@@ -165,6 +171,9 @@ pub fn parse_args() -> Result<Config> {
         watchlist_file: DEFAULT_WATCHLIST_FILE.to_string(),
         api_key: String::new(),
         api_key_header: DEFAULT_API_KEY_HEADER.to_string(),
+        log_enabled: false,
+        log_level: "info".to_string(),
+        log_file: "adsb-tui.log".to_string(),
         filter: String::new(),
         layout: "full".to_string(),
         theme: "default".to_string(),
@@ -255,6 +264,15 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_API_KEY_HEADER") {
         config.api_key_header = value;
+    }
+    if let Ok(value) = env::var("ADSB_LOG_ENABLED") {
+        config.log_enabled = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_LOG_LEVEL") {
+        config.log_level = value;
+    }
+    if let Ok(value) = env::var("ADSB_LOG_FILE") {
+        config.log_file = value;
     }
     if let Ok(value) = env::var("ADSB_WATCHLIST_ENABLED") {
         config.watchlist_enabled = matches!(value.as_str(), "1" | "true" | "yes" | "on");
@@ -447,6 +465,24 @@ pub fn parse_args() -> Result<Config> {
                 config.api_key_header = iter
                     .next()
                     .ok_or_else(|| anyhow!("--api-key-header needs a value"))?
+                    .to_string();
+            }
+            "--log" => {
+                config.log_enabled = true;
+            }
+            "--no-log" => {
+                config.log_enabled = false;
+            }
+            "--log-level" => {
+                config.log_level = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--log-level needs a value"))?
+                    .to_string();
+            }
+            "--log-file" => {
+                config.log_file = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--log-file needs a value"))?
                     .to_string();
             }
             "--watchlist-file" => {
@@ -679,6 +715,15 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(api_key_header) = file.api_key_header {
         target.api_key_header = api_key_header;
     }
+    if let Some(log_enabled) = file.log_enabled {
+        target.log_enabled = log_enabled;
+    }
+    if let Some(log_level) = file.log_level {
+        target.log_level = log_level;
+    }
+    if let Some(log_file) = file.log_file {
+        target.log_file = log_file;
+    }
     if let Some(watchlist_enabled) = file.watchlist_enabled {
         target.watchlist_enabled = watchlist_enabled;
     }
@@ -782,6 +827,7 @@ fn print_help() {
     );
     println!("       [--api-key KEY] [--api-key-header NAME]");
     println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
+    println!("       [--log] [--no-log] [--log-level LEVEL] [--log-file PATH]");
     println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
     println!(
         "       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]"
@@ -804,6 +850,7 @@ fn print_help() {
     println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
     println!("Environment: ADSB_API_KEY/ADSB_API_KEY_HEADER configure API auth header");
     println!("Environment: ADSB_WATCHLIST_ENABLED/FILE configure watchlist loading");
+    println!("Environment: ADSB_LOG_ENABLED/LEVEL/FILE configure logging");
     println!("Environment: ADSB_SITE_LAT/LON/ALT_M set receiver location");
     println!("Environment: ADSB_ROUTE_* configure route lookups");
     println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");
@@ -852,6 +899,9 @@ mod tests {
             watchlist_file: DEFAULT_WATCHLIST_FILE.to_string(),
             api_key: String::new(),
             api_key_header: DEFAULT_API_KEY_HEADER.to_string(),
+            log_enabled: false,
+            log_level: "info".to_string(),
+            log_file: "adsb-tui.log".to_string(),
             filter: String::new(),
             layout: "full".to_string(),
             theme: "default".to_string(),
@@ -892,6 +942,9 @@ url = "http://example.test/data.json"
 refresh_secs = 3
 api_key = "abc123"
 api_key_header = "api-auth"
+log_enabled = true
+log_level = "debug"
+log_file = "adsb-tui.log"
 watchlist_enabled = false
 watchlist_file = "custom-watch.toml"
 "#;
@@ -901,6 +954,9 @@ watchlist_file = "custom-watch.toml"
         assert_eq!(cfg.refresh_secs, Some(3));
         assert_eq!(cfg.api_key.as_deref(), Some("abc123"));
         assert_eq!(cfg.api_key_header.as_deref(), Some("api-auth"));
+        assert_eq!(cfg.log_enabled, Some(true));
+        assert_eq!(cfg.log_level.as_deref(), Some("debug"));
+        assert_eq!(cfg.log_file.as_deref(), Some("adsb-tui.log"));
         assert_eq!(cfg.watchlist_enabled, Some(false));
         assert_eq!(cfg.watchlist_file.as_deref(), Some("custom-watch.toml"));
         let _ = fs::remove_file(&path);
@@ -916,6 +972,9 @@ watchlist_file = "custom-watch.toml"
             notify_cooldown_secs: Some(2),
             api_key: Some("key".to_string()),
             api_key_header: Some("x-api-key".to_string()),
+            log_enabled: Some(true),
+            log_level: Some("trace".to_string()),
+            log_file: Some("trace.log".to_string()),
             watchlist_enabled: Some(false),
             watchlist_file: Some("wl.toml".to_string()),
             ..Default::default()
@@ -926,6 +985,9 @@ watchlist_file = "custom-watch.toml"
         assert_eq!(cfg.notify_cooldown_secs, 10);
         assert_eq!(cfg.api_key, "key");
         assert_eq!(cfg.api_key_header, "x-api-key");
+        assert!(cfg.log_enabled);
+        assert_eq!(cfg.log_level, "trace");
+        assert_eq!(cfg.log_file, "trace.log");
         assert!(!cfg.watchlist_enabled);
         assert_eq!(cfg.watchlist_file, "wl.toml");
     }

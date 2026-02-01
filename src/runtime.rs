@@ -19,6 +19,7 @@ use crate::model::ApiResponse;
 use crate::routes::{RouteMessage, RouteRequest};
 use crate::storage;
 use crate::ui;
+use tracing::{debug, error, info};
 
 pub fn init_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     enable_raw_mode()?;
@@ -48,13 +49,20 @@ pub fn run_app(
     routes: Option<RouteChannels>,
 ) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
+    info!("runtime loop started");
     let mut last_draw: Option<SystemTime> = None;
     loop {
         let mut dirty = false;
         while let Ok(message) = rx.try_recv() {
             match message {
-                Ok(data) => app.apply_update(data),
-                Err(err) => app.apply_error(err),
+                Ok(data) => {
+                    debug!("data update received");
+                    app.apply_update(data);
+                }
+                Err(err) => {
+                    error!("data error: {err}");
+                    app.apply_error(err);
+                }
             }
             dirty = true;
         }
@@ -62,8 +70,14 @@ pub fn run_app(
         if let Some(routes) = &routes {
             while let Ok(message) = routes.res_rx.try_recv() {
                 match message {
-                    RouteMessage::Results(results) => app.apply_routes(results),
-                    RouteMessage::Error(err) => app.set_route_error(err),
+                    RouteMessage::Results(results) => {
+                        debug!("route results received: {}", results.len());
+                        app.apply_routes(results);
+                    }
+                    RouteMessage::Error(err) => {
+                        error!("route error: {err}");
+                        app.set_route_error(err);
+                    }
                 }
                 dirty = true;
             }
@@ -99,7 +113,10 @@ pub fn run_app(
                         KeyCode::Char('f') => {
                             if app.toggle_favorite_selected(&indices) {
                                 if let Some(path) = app.favorites_path() {
-                                    let _ = storage::save_favorites(path, &app.favorites);
+                                    match storage::save_favorites(path, &app.favorites) {
+                                        Ok(_) => debug!("favorites saved {}", path.display()),
+                                        Err(err) => error!("favorites save failed: {err}"),
+                                    }
                                 }
                             }
                         }
@@ -110,13 +127,21 @@ pub fn run_app(
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
                         KeyCode::Char('e') => {
-                            if let Ok(path) = export::export_csv(&app, &indices) {
-                                app.set_last_export(path);
+                            match export::export_csv(&app, &indices) {
+                                Ok(path) => {
+                                    info!("export csv {}", path);
+                                    app.set_last_export(path);
+                                }
+                                Err(err) => error!("export csv failed: {err}"),
                             }
                         }
                         KeyCode::Char('E') => {
-                            if let Ok(path) = export::export_json(&app) {
-                                app.set_last_export(path);
+                            match export::export_json(&app) {
+                                Ok(path) => {
+                                    info!("export json {}", path);
+                                    app.set_last_export(path);
+                                }
+                                Err(err) => error!("export json failed: {err}"),
                             }
                         }
                         _ => {}
