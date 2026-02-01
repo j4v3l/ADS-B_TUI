@@ -1,0 +1,73 @@
+---
+name: Question / Help
+description: Ask a question or request help
+title: "[QUESTION] "
+labels: ["question", "help wanted"]
+assignees: ["j4v3l"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Question / Help Request
+
+        Need help with ADS-B TUI? Ask away! We're here to help.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: What would you like to know or what help do you need?
+      placeholder: "How do I..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: What area does your question relate to?
+      options:
+        - Installation / Setup
+        - Configuration
+        - Usage / Features
+        - Data Sources / ADS-B
+        - Development / Contributing
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other (please specify)
+
+  - type: input
+    id: version
+    attributes:
+      label: ADS-B TUI Version
+      description: What version are you using? (if applicable)
+      placeholder: "0.1.0"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any additional information that might help us answer your question?
+      placeholder: "I've tried... and got this error..."
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Before submitting, please check:
+      options:
+        - label: I have read the README and documentation
+          required: true
+        - label: I have searched existing issues and discussions
+          required: true
