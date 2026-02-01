@@ -1983,11 +1983,11 @@ fn get_flag(registration: Option<&str>) -> &'static str {
         }
         let two_char = if reg.len() >= 2 { &reg[0..2] } else { "" };
         let one_char = &reg[0..1];
-        
+
         match two_char {
             // Two-letter prefixes (letter-based)
             "PH" => "🇳🇱",
-            "SP" => "🇵🇱", 
+            "SP" => "🇵🇱",
             "SU" => "🇪🇬",
             "SX" => "🇬🇷",
             "TF" => "🇮🇸",
@@ -2208,7 +2208,10 @@ fn theme(mode: ThemeMode) -> Theme {
 
 #[cfg(test)]
 mod tests {
-    use super::get_flag;
+    use super::{
+        center_text, fmt_f64_trend, fmt_i64_trend, fmt_text, format_track_cell,
+        format_track_display, get_flag, text_len, truncate_to_width, TrendDir,
+    };
 
     #[test]
     fn test_get_flag() {
@@ -2219,5 +2222,48 @@ mod tests {
         assert_eq!(get_flag(Some("")), "🏳️");       // Empty
         assert_eq!(get_flag(None), "🏳️");           // None
         assert_eq!(get_flag(Some("9K123")), "🇰🇼"); // Kuwait (two-letter starting with digit)
+
+        // Test more country codes
+        assert_eq!(get_flag(Some("DABCD")), "🇩🇪");  // Germany
+        assert_eq!(get_flag(Some("FABCD")), "🇫🇷");  // France
+        assert_eq!(get_flag(Some("JABCD")), "🇯🇵");  // Japan
+        assert_eq!(get_flag(Some("C1234")), "🇨🇦");  // Canada
+        assert_eq!(get_flag(Some("LY123")), "🇱🇹");  // Lithuania (two-letter)
+        assert_eq!(get_flag(Some("ZS123")), "🇿🇦");  // South Africa (two-letter)
+    }
+
+    #[test]
+    fn test_get_flag_edge_cases() {
+        // Test various edge cases
+        assert_eq!(get_flag(Some("A")), "🇦🇺");      // Single character
+        assert_eq!(get_flag(Some("1")), "🏳️");      // Invalid single digit
+        assert_eq!(get_flag(Some("123")), "🏳️");    // All digits
+        assert_eq!(get_flag(Some("X9Y")), "🇨🇳");    // Single letter fallback
+    }
+
+    #[test]
+    fn test_text_helpers() {
+        assert_eq!(fmt_text(None), "--");
+        assert_eq!(fmt_text(Some("   ")), "--");
+        assert_eq!(fmt_text(Some("AB")), "AB");
+        assert_eq!(truncate_to_width("ABCDE".to_string(), 3), "ABC");
+        assert_eq!(truncate_to_width("ABCDE".to_string(), 0), "ABCDE");
+        assert_eq!(center_text("A", 3), " A ");
+        assert_eq!(center_text("AB", 2), "AB");
+        assert_eq!(text_len("ABC"), 3);
+    }
+
+    #[test]
+    fn test_track_formatting() {
+        assert_eq!(format_track_display(Some(370.0), false), "010°");
+        assert_eq!(format_track_cell(Some(90.0), true), "090→");
+        assert_eq!(format_track_display(None, true), "--");
+    }
+
+    #[test]
+    fn test_trend_formatting() {
+        assert_eq!(fmt_i64_trend(Some(100), TrendDir::Up, true, 0), "100↑");
+        assert_eq!(fmt_i64_trend(None, TrendDir::Unknown, true, 0), "-- ");
+        assert_eq!(fmt_f64_trend(Some(1.5), TrendDir::Down, 0, 1), "1.5↓");
     }
 }
