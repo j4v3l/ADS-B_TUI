@@ -1142,9 +1142,10 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
             )));
         }
     }
+    let save_hint = if app.config_dirty { "auto-save on close" } else { "w save" };
     lines.push(Line::from(Span::styled(
         format!(
-            "Up/Down select • Enter edit/apply • w save • Esc close  {}-{} / {}",
+            "Up/Down select • Enter edit/apply • {save_hint} • Esc close  {}-{} / {}",
             if total_items == 0 { 0 } else { start + 1 },
             end,
             total_items

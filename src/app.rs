@@ -306,6 +306,7 @@ pub struct App {
     pub(crate) config_cursor: usize,
     pub(crate) config_edit: String,
     pub(crate) config_editing: bool,
+    pub(crate) config_dirty: bool,
     pub(crate) config_status: Option<(String, SystemTime)>,
     pub(crate) watchlist_cursor: usize,
     pub(crate) trail_len: usize,
@@ -458,6 +459,7 @@ impl App {
             config_cursor: 0,
             config_edit: String::new(),
             config_editing: false,
+            config_dirty: false,
             config_status: None,
             watchlist_cursor: 0,
             trail_len: trail_len.max(1),
@@ -780,12 +782,18 @@ impl App {
         self.config_cursor = 0;
         self.config_editing = false;
         self.config_edit.clear();
+        self.config_dirty = false;
         self.config_status = None;
         self.input_mode = InputMode::Config;
         debug!("open config items={}", self.config_items.len());
     }
 
     pub fn close_config(&mut self) {
+        if self.config_dirty {
+            if !self.save_config() {
+                return;
+            }
+        }
         self.input_mode = InputMode::Normal;
         self.config_editing = false;
         self.config_edit.clear();
@@ -826,7 +834,11 @@ impl App {
 
     pub fn apply_config_edit(&mut self) {
         if let Some(item) = self.config_items.get_mut(self.config_cursor) {
-            item.value = self.config_edit.trim().to_string();
+            let next = self.config_edit.trim().to_string();
+            if item.value != next {
+                item.value = next;
+                self.config_dirty = true;
+            }
         }
         self.config_editing = false;
         self.config_edit.clear();
@@ -841,7 +853,7 @@ impl App {
         self.config_edit.pop();
     }
 
-    pub fn save_config(&mut self) {
+    pub fn save_config(&mut self) -> bool {
         let existing = fs::read_to_string(&self.config_path).unwrap_or_default();
         let mut doc = existing
             .parse::<DocumentMut>()
@@ -858,7 +870,7 @@ impl App {
                 Err(err) => {
                     warn!("config save failed: {err}");
                     self.config_status = Some((err, SystemTime::now()));
-                    return;
+                    return false;
                 }
             }
         }
@@ -867,13 +879,16 @@ impl App {
         if let Err(err) = fs::write(&self.config_path, text) {
             warn!("config save failed: {err}");
             self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
+            return false;
         } else {
             info!("config saved {}", self.config_path.display());
             self.config_status = Some((
                 format!("saved {} (restart to apply)", self.config_path.display()),
                 SystemTime::now(),
             ));
+            self.config_dirty = false;
         }
+        true
     }
 
     pub fn next_column(&mut self) {

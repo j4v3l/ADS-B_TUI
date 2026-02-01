@@ -214,7 +214,9 @@ pub fn run_app(
                                 app.close_config();
                             }
                         }
-                        KeyCode::Char('w') | KeyCode::Char('S') => app.save_config(),
+                        KeyCode::Char('w') | KeyCode::Char('S') => {
+                            app.save_config();
+                        }
                         KeyCode::Up => {
                             if !app.config_editing {
                                 app.previous_config_item();
