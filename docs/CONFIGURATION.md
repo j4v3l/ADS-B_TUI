@@ -49,6 +49,9 @@ insecure = false
 |---------|------|---------|-------------|
 | `flags_enabled` | boolean | true | Show country flags for aircraft |
 | `trail_len` | number | 6 | Length of aircraft trail lines |
+| `radar_range_nm` | number | 200.0 | Radar max range in nautical miles |
+| `radar_aspect` | number | 1.0 | Radar Y-axis scale factor for aspect compensation |
+| `radar_renderer` | string | "canvas" | Radar renderer ("canvas", "ascii") |
 | `ui_fps` | number | 60 | UI refresh rate in frames per second |
 | `smooth_mode` | boolean | true | Enable smooth scrolling |
 | `altitude_trend_arrows` | boolean | true | Show altitude trend arrows |
@@ -78,7 +81,7 @@ insecure = false
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `layout` | string | "full" | UI layout mode ("full", "minimal") |
+| `layout` | string | "full" | UI layout mode ("full", "compact", "radar") |
 | `theme` | string | "default" | Color theme |
 
 ### Performance Settings

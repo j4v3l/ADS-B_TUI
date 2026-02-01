@@ -37,6 +37,9 @@ pub const DEFAULT_STATS_METRIC_1: &str = "msg_rate_total";
 pub const DEFAULT_STATS_METRIC_2: &str = "kbps_total";
 pub const DEFAULT_STATS_METRIC_3: &str = "msg_rate_avg";
 pub const DEFAULT_FLAGS_ENABLED: bool = true;
+pub const DEFAULT_RADAR_RANGE_NM: f64 = 200.0;
+pub const DEFAULT_RADAR_ASPECT: f64 = 1.0;
+pub const DEFAULT_RADAR_RENDERER: &str = "canvas";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -60,6 +63,9 @@ pub struct Config {
     pub filter: String,
     pub layout: String,
     pub theme: String,
+    pub radar_range_nm: f64,
+    pub radar_aspect: f64,
+    pub radar_renderer: String,
     pub site_lat: Option<f64>,
     pub site_lon: Option<f64>,
     pub site_alt_m: Option<f64>,
@@ -109,6 +115,9 @@ struct FileConfig {
     filter: Option<String>,
     layout: Option<String>,
     theme: Option<String>,
+    radar_range_nm: Option<f64>,
+    radar_aspect: Option<f64>,
+    radar_renderer: Option<String>,
     site_lat: Option<f64>,
     site_lon: Option<f64>,
     site_alt_m: Option<f64>,
@@ -177,6 +186,9 @@ pub fn parse_args() -> Result<Config> {
         filter: String::new(),
         layout: "full".to_string(),
         theme: "default".to_string(),
+        radar_range_nm: DEFAULT_RADAR_RANGE_NM,
+        radar_aspect: DEFAULT_RADAR_ASPECT,
+        radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
         site_lat: None,
         site_lon: None,
         site_alt_m: None,
@@ -285,6 +297,19 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_THEME") {
         config.theme = value;
+    }
+    if let Ok(value) = env::var("ADSB_RADAR_RANGE_NM") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.radar_range_nm = val.max(1.0);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_RADAR_ASPECT") {
+        if let Ok(val) = value.parse::<f64>() {
+            config.radar_aspect = val.max(0.2);
+        }
+    }
+    if let Ok(value) = env::var("ADSB_RADAR_RENDERER") {
+        config.radar_renderer = value;
     }
     if let Ok(value) = env::var("ADSB_SITE_LAT") {
         if let Ok(val) = value.parse::<f64>() {
@@ -507,6 +532,24 @@ pub fn parse_args() -> Result<Config> {
                 config.theme = iter
                     .next()
                     .ok_or_else(|| anyhow!("--theme needs a value"))?
+                    .to_string();
+            }
+            "--radar-range-nm" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--radar-range-nm needs a value"))?;
+                config.radar_range_nm = value.parse::<f64>()?.max(1.0);
+            }
+            "--radar-aspect" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--radar-aspect needs a value"))?;
+                config.radar_aspect = value.parse::<f64>()?.max(0.2);
+            }
+            "--radar-renderer" => {
+                config.radar_renderer = iter
+                    .next()
+                    .ok_or_else(|| anyhow!("--radar-renderer needs a value"))?
                     .to_string();
             }
             "--site-lat" => {
@@ -739,6 +782,15 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(theme) = file.theme {
         target.theme = theme;
     }
+    if let Some(radar_range_nm) = file.radar_range_nm {
+        target.radar_range_nm = radar_range_nm.max(1.0);
+    }
+    if let Some(radar_aspect) = file.radar_aspect {
+        target.radar_aspect = radar_aspect.max(0.2);
+    }
+    if let Some(radar_renderer) = file.radar_renderer {
+        target.radar_renderer = radar_renderer;
+    }
     if let Some(site_lat) = file.site_lat {
         target.site_lat = Some(site_lat);
     }
@@ -830,8 +882,9 @@ fn print_help() {
     println!("       [--log] [--no-log] [--log-level LEVEL] [--log-file PATH]");
     println!("       [--stale SECONDS] [--low-nic N] [--low-nac N]");
     println!(
-        "       [--trail N] [--layout full|compact] [--theme default|color|amber|ocean|matrix]"
+        "       [--trail N] [--layout full|compact|radar] [--theme default|color|amber|ocean|matrix]"
     );
+    println!("       [--radar-range-nm NM] [--radar-aspect RATIO] [--radar-renderer canvas|ascii]");
     println!("       [--site-lat LAT] [--site-lon LON] [--site-alt-m METERS]");
     println!("       [--route-base URL] [--route-ttl SECS] [--route-refresh SECS]");
     println!("       [--route-batch N] [--route-timeout SECS] [--route-disable]");
@@ -856,12 +909,13 @@ fn print_help() {
     println!("Environment: ADSB_UI_FPS ADSB_SMOOTH ADSB_SMOOTH_MERGE control smoothing");
     println!("Environment: ADSB_RATE_WINDOW_MS ADSB_RATE_MIN_SECS control msg rate smoothing");
     println!("Environment: ADSB_NOTIFY_MI ADSB_OVERPASS_MI ADSB_NOTIFY_COOLDOWN control proximity alerts");
+    println!("Environment: ADSB_RADAR_RANGE_NM/ASPECT/RENDERER control radar display");
     println!("Environment: ADSB_ALT_TREND toggles altitude trend arrows");
     println!("Environment: ADSB_COLUMN_CACHE toggles column width cache");
     println!("Environment: ADSB_TRACK_ARROWS toggles track direction arrows");
     println!("Environment: ADSB_STATS_METRIC_1/2/3 control stats metrics");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
-    println!("      t theme | l layout | e export csv | E export json");
+    println!("      t theme | l layout | R radar | e export csv | E export json");
     println!("      C config editor");
 }
 
@@ -905,6 +959,9 @@ mod tests {
             filter: String::new(),
             layout: "full".to_string(),
             theme: "default".to_string(),
+            radar_range_nm: DEFAULT_RADAR_RANGE_NM,
+            radar_aspect: DEFAULT_RADAR_ASPECT,
+            radar_renderer: DEFAULT_RADAR_RENDERER.to_string(),
             site_lat: None,
             site_lon: None,
             site_alt_m: None,
