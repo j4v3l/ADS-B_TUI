@@ -129,11 +129,7 @@ fn collect_data(
     for idx in indices {
         let ac = &app.data.aircraft[*idx];
         if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
-            let label = if collect_labels {
-                label_info(ac)
-            } else {
-                None
-            };
+            let label = if collect_labels { label_info(ac) } else { None };
             raw_points.push(RawPoint {
                 lat,
                 lon,
@@ -393,11 +389,7 @@ fn render_canvas(
                     }
                 }
 
-                other_labels.sort_by(|a, b| {
-                    a.dist
-                        .partial_cmp(&b.dist)
-                        .unwrap_or(Ordering::Equal)
-                });
+                other_labels.sort_by(|a, b| a.dist.partial_cmp(&b.dist).unwrap_or(Ordering::Equal));
 
                 let max_labels = label_capacity(area);
                 let mut drawn = Vec::new();
@@ -405,7 +397,10 @@ fn render_canvas(
                 append_unique_labels(&mut drawn, &fav_labels);
                 let remaining = max_labels.saturating_sub(drawn.len());
                 if remaining > 0 {
-                    append_unique_labels(&mut drawn, &other_labels[..remaining.min(other_labels.len())]);
+                    append_unique_labels(
+                        &mut drawn,
+                        &other_labels[..remaining.min(other_labels.len())],
+                    );
                 }
 
                 for label in drawn {
@@ -594,9 +589,7 @@ fn append_unique_labels<'a>(target: &mut Vec<&'a RadarLabel>, source: &[&'a Rada
 
 fn blip_glyph(style: RadarBlip, track: Option<f64>) -> &'static str {
     match style {
-        RadarBlip::Plane => track
-            .map(direction_glyph)
-            .unwrap_or("✈"),
+        RadarBlip::Plane => track.map(direction_glyph).unwrap_or("✈"),
         RadarBlip::Block => "■",
         RadarBlip::Dot => "•",
     }
@@ -742,8 +735,13 @@ fn selected_aircraft(
     }
 
     let alt = ac.alt_baro.or(ac.alt_geom);
-    let alt_text = alt.map(|v| format!("{v} ft")).unwrap_or_else(|| "--".to_string());
-    let gs_text = ac.gs.map(|v| format!("{v:.0} kt")).unwrap_or_else(|| "--".to_string());
+    let alt_text = alt
+        .map(|v| format!("{v} ft"))
+        .unwrap_or_else(|| "--".to_string());
+    let gs_text = ac
+        .gs
+        .map(|v| format!("{v:.0} kt"))
+        .unwrap_or_else(|| "--".to_string());
     let trk_text = ac
         .track
         .map(|v| format!("{v:.0}°"))
