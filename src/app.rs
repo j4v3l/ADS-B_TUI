@@ -11,8 +11,8 @@ use toml_edit::DocumentMut;
 use tracing::{debug, info, trace, warn};
 
 use crate::config;
-use crate::storage;
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
+use crate::storage;
 use crate::watchlist::WatchEntry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -565,8 +565,15 @@ impl App {
             data.aircraft.len(),
             data.messages
         );
-        let now_time = data.now
-            .and_then(|n| if n > 0 { Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64)) } else { None })
+        let now_time = data
+            .now
+            .and_then(|n| {
+                if n > 0 {
+                    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64))
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(SystemTime::now);
         self.update_rate(&data, now_time);
         self.update_aircraft_rates(&data, now_time);
@@ -644,7 +651,10 @@ impl App {
 
     pub fn toggle_radar_labels(&mut self) {
         self.radar_labels = !self.radar_labels;
-        debug!("radar labels -> {}", if self.radar_labels { "on" } else { "off" });
+        debug!(
+            "radar labels -> {}",
+            if self.radar_labels { "on" } else { "off" }
+        );
     }
 
     pub fn open_columns(&mut self) {
@@ -1843,8 +1853,11 @@ impl App {
 
         let max_age_secs = self.notify_cooldown.as_secs().saturating_mul(4).max(60);
         let max_age = Duration::from_secs(max_age_secs);
-        self.watch_notified_recent
-            .retain(|_, last| now.duration_since(*last).map(|d| d <= max_age).unwrap_or(true));
+        self.watch_notified_recent.retain(|_, last| {
+            now.duration_since(*last)
+                .map(|d| d <= max_age)
+                .unwrap_or(true)
+        });
 
         for ac in &data.aircraft {
             let Some(entry) = self.watch_entry_for(ac).cloned() else {
@@ -1981,16 +1994,16 @@ fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteIn
             .as_deref()
             .map(|cs| match_text(&normalize_callsign(value), &normalize_callsign(cs), mode))
             .unwrap_or(false),
-        "reg" | "registration" => ac
-            .r
-            .as_deref()
-            .map(|reg| match_text(&normalize_text(value), &normalize_text(reg), mode))
-            .unwrap_or(false),
-        "type" => ac
-            .t
-            .as_deref()
-            .map(|t| match_text(&normalize_text(value), &normalize_text(t), mode))
-            .unwrap_or(false),
+        "reg" | "registration" => {
+            ac.r.as_deref()
+                .map(|reg| match_text(&normalize_text(value), &normalize_text(reg), mode))
+                .unwrap_or(false)
+        }
+        "type" => {
+            ac.t.as_deref()
+                .map(|t| match_text(&normalize_text(value), &normalize_text(t), mode))
+                .unwrap_or(false)
+        }
         "owner" | "operator" | "ownop" => ac
             .own_op
             .as_deref()
@@ -2757,7 +2770,9 @@ mod tests {
 
     #[test]
     fn parse_config_value_cases() {
-        assert!(parse_config_value(ConfigKind::Str, "abc").unwrap().is_some());
+        assert!(parse_config_value(ConfigKind::Str, "abc")
+            .unwrap()
+            .is_some());
         assert_eq!(
             parse_config_value(ConfigKind::Bool, "true").unwrap(),
             Some(toml::Value::Boolean(true))
@@ -2767,7 +2782,9 @@ mod tests {
             Some(toml::Value::Boolean(false))
         );
         assert!(parse_config_value(ConfigKind::Int, "42").unwrap().is_some());
-        assert!(parse_config_value(ConfigKind::Float, "1.5").unwrap().is_some());
+        assert!(parse_config_value(ConfigKind::Float, "1.5")
+            .unwrap()
+            .is_some());
         assert!(parse_config_value(ConfigKind::Str, " ").unwrap().is_none());
         assert!(parse_config_value(ConfigKind::Bool, "maybe").is_err());
     }

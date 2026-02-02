@@ -1,0 +1,53 @@
+{
+  // Rust-specific settings
+  "rust-analyzer.checkOnSave.command": "clippy",
+  "rust-analyzer.checkOnSave.enable": true,
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.diagnostics.disabled": [
+    "inactive-code"
+  ],
+
+  // Editor settings
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "editor.defaultFormatter": "rust-lang.rust-analyzer",
+
+  // File associations
+  "files.associations": {
+    "Cargo.toml": "toml",
+    "Cargo.lock": "toml"
+  },
+
+  // Terminal settings
+  "terminal.integrated.shell.osx": "/bin/zsh",
+
+  // Git settings
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  "git.autofetch": true,
+
+  // Workspace settings
+  "search.exclude": {
+    "**/target": true,
+    "**/Cargo.lock": true,
+    "**/*.rs.bk": true
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/target": true
+  },
+
+  // Extension recommendations
+  "recommendations": [
+    "rust-lang.rust-analyzer",
+    "tamasfe.even-better-toml",
+    "ms-vscode.vscode-json",
+    "GitHub.copilot"
+  ]
+}
