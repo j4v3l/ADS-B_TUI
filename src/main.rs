@@ -1,14 +1,14 @@
 mod app;
 mod config;
 mod export;
+mod logging;
 mod model;
 mod net;
+mod radar;
 mod routes;
 mod runtime;
 mod storage;
 mod ui;
-mod radar;
-mod logging;
 mod watchlist;
 
 use anyhow::Result;

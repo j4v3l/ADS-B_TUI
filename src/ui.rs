@@ -6,7 +6,9 @@ use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, 
 use ratatui::Frame;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::app::{App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
+use crate::app::{
+    App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir,
+};
 use crate::model::seen_seconds;
 use crate::radar::{self, RadarSettings, RadarTheme};
 
@@ -175,7 +177,10 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
-        Span::styled(format!("TOT {total_text}"), Style::default().fg(theme.accent)),
+        Span::styled(
+            format!("TOT {total_text}"),
+            Style::default().fg(theme.accent),
+        ),
         Span::raw(" | "),
         Span::styled(format!("AVG {avg_text}"), Style::default().fg(theme.dim)),
     ]);
@@ -210,11 +215,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
-    let title = if app.demo_mode {
-        "FEED (DEMO)"
-    } else {
-        "FEED"
-    };
+    let title = if app.demo_mode { "FEED (DEMO)" } else { "FEED" };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -894,7 +895,9 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
                     format!("SAVED {}", name),
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
         }
@@ -958,7 +961,9 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
     let lines = vec![
         Line::from(Span::styled(
             "HELP",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "Navigation",
@@ -1042,7 +1047,9 @@ fn render_legend_menu(f: &mut Frame, area: Rect, app: &App) {
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
         "LEGEND",
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -1162,7 +1169,11 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
             )));
         }
     }
-    let save_hint = if app.config_dirty { "auto-save on close" } else { "w save" };
+    let save_hint = if app.config_dirty {
+        "auto-save on close"
+    } else {
+        "w save"
+    };
     lines.push(Line::from(Span::styled(
         format!(
             "Up/Down select • Enter edit/apply • {save_hint} • Esc close  {}-{} / {}",
@@ -1867,7 +1878,11 @@ fn cell_for_column(
     if id == ColumnId::Fav && favorite {
         Cell::from(text).style(Style::default().fg(theme.fav).add_modifier(Modifier::BOLD))
     } else if id == ColumnId::Watch && watchlisted {
-        Cell::from(text).style(Style::default().fg(theme.watch).add_modifier(Modifier::BOLD))
+        Cell::from(text).style(
+            Style::default()
+                .fg(theme.watch)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Cell::from(text)
     }
@@ -2126,7 +2141,7 @@ fn flag_emoji(registration: Option<&str>) -> &'static str {
                 "Y" => "🇳🇴",
                 "Z" => "🇳🇿",
                 _ => "🏳️",
-            }
+            },
         }
     } else {
         "🏳️"
@@ -2234,28 +2249,28 @@ mod tests {
     fn test_get_flag() {
         // Test single-letter prefixes
         assert_eq!(get_flag(Some("N12345"), FlagStyle::Emoji), "🇺🇸"); // USA
-        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Emoji), "🇬🇧");  // UK
-        assert_eq!(get_flag(Some("PH123"), FlagStyle::Emoji), "🇳🇱");  // Netherlands (two-letter)
-        assert_eq!(get_flag(Some(""), FlagStyle::Emoji), "🏳️");       // Empty
-        assert_eq!(get_flag(None, FlagStyle::Emoji), "🏳️");           // None
+        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Emoji), "🇬🇧"); // UK
+        assert_eq!(get_flag(Some("PH123"), FlagStyle::Emoji), "🇳🇱"); // Netherlands (two-letter)
+        assert_eq!(get_flag(Some(""), FlagStyle::Emoji), "🏳️"); // Empty
+        assert_eq!(get_flag(None, FlagStyle::Emoji), "🏳️"); // None
         assert_eq!(get_flag(Some("9K123"), FlagStyle::Emoji), "🇰🇼"); // Kuwait (two-letter starting with digit)
 
         // Test more country codes
-        assert_eq!(get_flag(Some("DABCD"), FlagStyle::Emoji), "🇩🇪");  // Germany
-        assert_eq!(get_flag(Some("FABCD"), FlagStyle::Emoji), "🇫🇷");  // France
-        assert_eq!(get_flag(Some("JABCD"), FlagStyle::Emoji), "🇯🇵");  // Japan
-        assert_eq!(get_flag(Some("C1234"), FlagStyle::Emoji), "🇨🇦");  // Canada
-        assert_eq!(get_flag(Some("LY123"), FlagStyle::Emoji), "🇱🇹");  // Lithuania (two-letter)
-        assert_eq!(get_flag(Some("ZS123"), FlagStyle::Emoji), "🇿🇦");  // South Africa (two-letter)
+        assert_eq!(get_flag(Some("DABCD"), FlagStyle::Emoji), "🇩🇪"); // Germany
+        assert_eq!(get_flag(Some("FABCD"), FlagStyle::Emoji), "🇫🇷"); // France
+        assert_eq!(get_flag(Some("JABCD"), FlagStyle::Emoji), "🇯🇵"); // Japan
+        assert_eq!(get_flag(Some("C1234"), FlagStyle::Emoji), "🇨🇦"); // Canada
+        assert_eq!(get_flag(Some("LY123"), FlagStyle::Emoji), "🇱🇹"); // Lithuania (two-letter)
+        assert_eq!(get_flag(Some("ZS123"), FlagStyle::Emoji), "🇿🇦"); // South Africa (two-letter)
     }
 
     #[test]
     fn test_get_flag_edge_cases() {
         // Test various edge cases
-        assert_eq!(get_flag(Some("A"), FlagStyle::Emoji), "🇦🇺");      // Single character
-        assert_eq!(get_flag(Some("1"), FlagStyle::Emoji), "🏳️");      // Invalid single digit
-        assert_eq!(get_flag(Some("123"), FlagStyle::Emoji), "🏳️");    // All digits
-        assert_eq!(get_flag(Some("X9Y"), FlagStyle::Emoji), "🇨🇳");    // Single letter fallback
+        assert_eq!(get_flag(Some("A"), FlagStyle::Emoji), "🇦🇺"); // Single character
+        assert_eq!(get_flag(Some("1"), FlagStyle::Emoji), "🏳️"); // Invalid single digit
+        assert_eq!(get_flag(Some("123"), FlagStyle::Emoji), "🏳️"); // All digits
+        assert_eq!(get_flag(Some("X9Y"), FlagStyle::Emoji), "🇨🇳"); // Single letter fallback
     }
 
     #[test]

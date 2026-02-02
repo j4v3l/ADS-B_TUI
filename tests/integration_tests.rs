@@ -53,8 +53,14 @@ fn test_cargo_toml_metadata() {
     // Test that Cargo.toml has required metadata
     let cargo_content = fs::read_to_string("Cargo.toml").expect("Failed to read Cargo.toml");
 
-    assert!(cargo_content.contains("name = \"adsb-tui\""), "Missing package name");
-    assert!(cargo_content.contains("description ="), "Missing description");
+    assert!(
+        cargo_content.contains("name = \"adsb-tui\""),
+        "Missing package name"
+    );
+    assert!(
+        cargo_content.contains("description ="),
+        "Missing description"
+    );
     assert!(cargo_content.contains("license ="), "Missing license");
     assert!(cargo_content.contains("readme ="), "Missing readme");
     assert!(cargo_content.contains("homepage ="), "Missing homepage");
@@ -77,6 +83,10 @@ fn test_readme_exists_and_complete() {
     ];
 
     for section in required_sections {
-        assert!(readme_content.contains(section), "README missing section: {}", section);
+        assert!(
+            readme_content.contains(section),
+            "README missing section: {}",
+            section
+        );
     }
 }

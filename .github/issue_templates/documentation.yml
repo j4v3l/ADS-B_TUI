@@ -2,8 +2,6 @@
 name: Documentation Improvement
 description: Suggest improvements to documentation
 title: "[DOCS] "
-labels: ["documentation", "help wanted"]
-assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
