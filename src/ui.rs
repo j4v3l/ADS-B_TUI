@@ -28,7 +28,7 @@ struct Theme {
 }
 
 pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
-    let size = f.size();
+    let size = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -658,7 +658,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .block(block)
         .column_spacing(1)
         .style(Style::default().bg(theme.panel_bg))
-        .highlight_style(
+        .row_highlight_style(
             Style::default()
                 .fg(theme.highlight_fg)
                 .bg(theme.highlight_bg)
@@ -1626,7 +1626,7 @@ fn phase_ms(period_ms: u64) -> bool {
     if period_ms == 0 {
         return true;
     }
-    (now_ms() / period_ms) % 2 == 0
+    (now_ms() / period_ms).is_multiple_of(2)
 }
 
 fn phase_index(period_ms: u64, frames: usize) -> usize {

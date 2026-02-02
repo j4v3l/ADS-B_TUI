@@ -889,8 +889,16 @@ impl App {
         let mut doc = existing
             .parse::<DocumentMut>()
             .unwrap_or_else(|_| DocumentMut::new());
+        let mut api_key_skipped = false;
 
         for item in &self.config_items {
+            if item.key == "api_key" {
+                if !item.value.trim().is_empty() {
+                    api_key_skipped = true;
+                }
+                doc.remove(item.key.as_str());
+                continue;
+            }
             match parse_config_value(item.kind, item.value.trim()) {
                 Ok(Some(value)) => {
                     doc[item.key.as_str()] = to_edit_value(value);
@@ -912,11 +920,17 @@ impl App {
             self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
             return false;
         } else {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&self.config_path, fs::Permissions::from_mode(0o600));
+            }
             info!("config saved {}", self.config_path.display());
-            self.config_status = Some((
-                format!("saved {} (restart to apply)", self.config_path.display()),
-                SystemTime::now(),
-            ));
+            let mut message = format!("saved {} (restart to apply)", self.config_path.display());
+            if api_key_skipped {
+                message.push_str("; api_key not saved");
+            }
+            self.config_status = Some((message, SystemTime::now()));
             self.config_dirty = false;
         }
         true
@@ -2302,6 +2316,8 @@ fn default_config_items() -> Vec<ConfigItem> {
         config::DEFAULT_REFRESH_SECS.to_string(),
     );
     push_item("insecure", ConfigKind::Bool, "false".to_string());
+    push_item("allow_http", ConfigKind::Bool, "false".to_string());
+    push_item("allow_insecure", ConfigKind::Bool, "false".to_string());
     push_item(
         "stale_secs",
         ConfigKind::Int,
