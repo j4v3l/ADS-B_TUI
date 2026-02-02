@@ -2,6 +2,7 @@
 name: Question / Help
 description: Ask a question or request help
 title: "[QUESTION] "
+assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
@@ -15,7 +16,7 @@ body:
     attributes:
       label: Your Question
       description: What would you like to know or what help do you need?
-      placeholder: "How do I..."
+      placeholder: "Example: How do I point adsb-tui at a remote dump1090 feed?"
     validations:
       required: true
 
@@ -50,14 +51,14 @@ body:
     attributes:
       label: ADS-B TUI Version
       description: What version are you using? (if applicable)
-      placeholder: "0.1.0"
+      placeholder: "Example: 0.3.2 (from releases)"
 
   - type: textarea
     id: context
     attributes:
       label: Additional Context
       description: Any additional information that might help us answer your question?
-      placeholder: "I've tried... and got this error..."
+      placeholder: "Example: Tried URL http://raspi:8080/data/aircraft.json and saw connection refused"
 
   - type: checkboxes
     id: checklist
