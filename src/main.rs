@@ -3,29 +3,55 @@ mod config;
 mod export;
 mod model;
 mod net;
+mod routes;
 mod runtime;
 mod storage;
 mod ui;
-mod routes;
+mod radar;
+mod logging;
+mod watchlist;
 
 use anyhow::Result;
 use std::collections::HashSet;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use app::{App, LayoutMode, SiteLocation, ThemeMode};
+use app::{App, FlagStyle, LayoutMode, RadarBlip, RadarRenderer, SiteLocation, ThemeMode};
 use config::parse_args;
+use logging::init as init_logging;
 use net::spawn_fetcher;
-use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use routes::spawn_route_fetcher;
+use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
 use std::path::PathBuf;
-use storage::load_favorites;
+use storage::{load_favorites, load_watchlist};
+use tracing::{debug, info, warn};
 
 fn main() -> Result<()> {
     let config = parse_args()?;
+    let _log_guard = init_logging(&config);
+    info!("adsb-tui starting");
+    debug!("config path: {}", config.config_path.display());
     let (tx, rx) = mpsc::channel();
 
-    spawn_fetcher(config.url.clone(), config.refresh, config.insecure, tx);
+    let api_key = if config.api_key.trim().is_empty() {
+        None
+    } else {
+        Some(config.api_key.clone())
+    };
+    let api_key_header = if config.api_key_header.trim().is_empty() {
+        None
+    } else {
+        Some(config.api_key_header.clone())
+    };
+
+    spawn_fetcher(
+        config.url.clone(),
+        config.refresh,
+        config.insecure,
+        api_key,
+        api_key_header,
+        tx,
+    );
 
     let mut favorites: HashSet<String> = config
         .favorites
@@ -46,8 +72,27 @@ fn main() -> Result<()> {
         }
     }
 
+    let watchlist_path = if config.watchlist_file.trim().is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(config.watchlist_file))
+    };
+    let mut watchlist = Vec::new();
+    if config.watchlist_enabled {
+        if let Some(path) = watchlist_path.as_ref() {
+            if let Ok(entries) = load_watchlist(path) {
+                watchlist = entries;
+            } else {
+                warn!("failed to load watchlist from {}", path.display());
+            }
+        }
+    }
+
     let layout_mode = LayoutMode::from_str(&config.layout);
     let theme_mode = ThemeMode::from_str(&config.theme);
+    let radar_renderer = RadarRenderer::from_str(&config.radar_renderer);
+    let radar_blip = RadarBlip::from_str(&config.radar_blip);
+    let flag_style = FlagStyle::from_str(&config.flag_style);
     let site = match (config.site_lat, config.site_lon) {
         (Some(lat), Some(lon)) => Some(SiteLocation {
             lat,
@@ -84,17 +129,27 @@ fn main() -> Result<()> {
             config.url,
             config.refresh,
             config.stale_secs as f64,
+            config.hide_stale,
             config.low_nic,
             config.low_nac,
             favorites,
             config.filter,
             layout_mode,
             theme_mode,
+            config.column_cache,
+            Duration::from_millis(400),
+            config.config_path.clone(),
             config.trail_len as usize,
             favorites_path.clone(),
             site,
+            config.demo_mode,
+            config.radar_range_nm,
+            config.radar_aspect,
+            radar_renderer,
+            config.radar_labels,
+            radar_blip,
             config.route_enabled,
-            config.route_mode.to_ascii_lowercase() == "tar1090",
+            config.route_mode.eq_ignore_ascii_case("tar1090"),
             Duration::from_secs(config.route_ttl_secs),
             Duration::from_secs(config.route_refresh_secs),
             config.route_batch as usize,
@@ -106,6 +161,16 @@ fn main() -> Result<()> {
             config.notify_radius_mi,
             config.overpass_mi,
             Duration::from_secs(config.notify_cooldown_secs),
+            config.altitude_trend_arrows,
+            config.track_arrows,
+            config.flags_enabled,
+            flag_style,
+            config.stats_metric_1.clone(),
+            config.stats_metric_2.clone(),
+            config.stats_metric_3.clone(),
+            config.watchlist_enabled,
+            watchlist_path.clone(),
+            watchlist,
         ),
         rx,
         route_channels,
@@ -113,8 +178,10 @@ fn main() -> Result<()> {
     restore_terminal(&mut terminal)?;
 
     if let Err(err) = res {
+        warn!("runtime error: {err}");
         eprintln!("{err}");
     }
 
+    info!("adsb-tui exited");
     Ok(())
 }

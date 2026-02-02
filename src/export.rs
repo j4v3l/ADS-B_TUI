@@ -40,15 +40,17 @@ pub fn export_csv(app: &App, indices: &[usize]) -> Result<String> {
 }
 
 pub fn export_json(app: &App) -> Result<String> {
-    let filename = format!("adsb-snapshot-{}.json", Local::now().format("%Y%m%d-%H%M%S"));
+    let filename = format!(
+        "adsb-snapshot-{}.json",
+        Local::now().format("%Y%m%d-%H%M%S")
+    );
     let mut path = export_path(&filename)?;
     if path.exists() {
         path = unique_path(&path);
     }
 
     let payload = serde_json::to_string_pretty(&app.data)?;
-    fs::write(&path, payload)
-        .with_context(|| format!("Failed to write {}", path.display()))?;
+    fs::write(&path, payload).with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -81,7 +83,7 @@ fn export_path(filename: &str) -> Result<PathBuf> {
     Ok(dir.join(filename))
 }
 
-fn unique_path(path: &PathBuf) -> PathBuf {
+fn unique_path(path: &Path) -> PathBuf {
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
