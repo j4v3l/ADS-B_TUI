@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug adsb-tui",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/adsb-tui",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "cargo build",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug adsb-tui (Release)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/release/adsb-tui",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "cargo build --release",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Debug tests",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/deps/adsb_tui-*.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "cargo test --no-run",
+      "console": "integratedTerminal"
+    }
+  ]
+}
