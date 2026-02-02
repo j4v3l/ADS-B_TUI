@@ -51,6 +51,8 @@ pub struct Config {
     pub url: String,
     pub refresh: Duration,
     pub insecure: bool,
+    pub allow_http: bool,
+    pub allow_insecure: bool,
     pub config_path: PathBuf,
     pub stale_secs: u64,
     pub hide_stale: bool,
@@ -109,6 +111,8 @@ struct FileConfig {
     url: Option<String>,
     refresh_secs: Option<u64>,
     insecure: Option<bool>,
+    allow_http: Option<bool>,
+    allow_insecure: Option<bool>,
     stale_secs: Option<u64>,
     hide_stale: Option<bool>,
     low_nic: Option<i64>,
@@ -184,6 +188,8 @@ pub fn parse_args() -> Result<Config> {
         url: DEFAULT_URL.to_string(),
         refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
         insecure: false,
+        allow_http: false,
+        allow_insecure: false,
         config_path: config_path.clone(),
         stale_secs: DEFAULT_STALE_SECS,
         hide_stale: DEFAULT_HIDE_STALE,
@@ -257,6 +263,12 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_INSECURE") {
         config.insecure = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_ALLOW_HTTP") {
+        config.allow_http = matches!(value.as_str(), "1" | "true" | "yes" | "on");
+    }
+    if let Ok(value) = env::var("ADSB_ALLOW_INSECURE") {
+        config.allow_insecure = matches!(value.as_str(), "1" | "true" | "yes" | "on");
     }
     if let Ok(value) = env::var("ADSB_STALE_SECS") {
         if let Ok(secs) = value.parse::<u64>() {
@@ -469,6 +481,12 @@ pub fn parse_args() -> Result<Config> {
             }
             "--insecure" => {
                 config.insecure = true;
+            }
+            "--allow-http" => {
+                config.allow_http = true;
+            }
+            "--allow-insecure" => {
+                config.allow_insecure = true;
             }
             "--stale" => {
                 let value = iter
@@ -778,6 +796,7 @@ pub fn parse_args() -> Result<Config> {
         }
     }
 
+    validate_security(&config)?;
     Ok(config)
 }
 
@@ -798,6 +817,12 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     }
     if let Some(insecure) = file.insecure {
         target.insecure = insecure;
+    }
+    if let Some(allow_http) = file.allow_http {
+        target.allow_http = allow_http;
+    }
+    if let Some(allow_insecure) = file.allow_insecure {
+        target.allow_insecure = allow_insecure;
     }
     if let Some(stale_secs) = file.stale_secs {
         target.stale_secs = stale_secs.max(1);
@@ -954,6 +979,7 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
 fn print_help() {
     println!("adsb-tui");
     println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
+    println!("       [--allow-http] [--allow-insecure]");
     println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
     println!("       [--api-key KEY] [--api-key-header NAME]");
     println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
@@ -980,6 +1006,8 @@ fn print_help() {
     println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
     println!("Environment: ADSB_URL overrides the default URL");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
+    println!("Environment: ADSB_ALLOW_HTTP=1 allows http:// URLs");
+    println!("Environment: ADSB_ALLOW_INSECURE=1 allows --insecure");
     println!("Environment: ADSB_CONFIG overrides config path");
     println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
     println!("Environment: ADSB_HIDE_STALE filters stale aircraft from the table");
@@ -1005,6 +1033,21 @@ fn print_help() {
     println!("      C config editor");
 }
 
+fn validate_security(config: &Config) -> Result<()> {
+    let url = config.url.trim();
+    if url.to_ascii_lowercase().starts_with("http://") && !config.allow_http {
+        return Err(anyhow!(
+            "Refusing insecure http URL (set allow_http=true or ADSB_ALLOW_HTTP=1 to override)"
+        ));
+    }
+    if config.insecure && !config.allow_insecure {
+        return Err(anyhow!(
+            "Refusing --insecure without explicit allow_insecure=true or ADSB_ALLOW_INSECURE=1"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1028,6 +1071,8 @@ mod tests {
             url: DEFAULT_URL.to_string(),
             refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
             insecure: false,
+            allow_http: false,
+            allow_insecure: false,
             config_path: PathBuf::from("adsb-tui.toml"),
             stale_secs: DEFAULT_STALE_SECS,
             hide_stale: DEFAULT_HIDE_STALE,

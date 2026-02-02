@@ -28,7 +28,7 @@ struct Theme {
 }
 
 pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
-    let size = f.size();
+    let size = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -658,7 +658,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .block(block)
         .column_spacing(1)
         .style(Style::default().bg(theme.panel_bg))
-        .highlight_style(
+        .row_highlight_style(
             Style::default()
                 .fg(theme.highlight_fg)
                 .bg(theme.highlight_bg)

@@ -1,5 +1,7 @@
 use crate::config::Config;
 use std::fs::{self, OpenOptions};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt::time::ChronoLocal;
@@ -33,7 +35,11 @@ pub fn init(config: &Config) -> Option<WorkerGuard> {
             .append(true)
             .open(&config.log_file)
         {
-            Ok(file) => tracing_appender::non_blocking(file),
+            Ok(file) => {
+                #[cfg(unix)]
+                let _ = fs::set_permissions(&config.log_file, fs::Permissions::from_mode(0o600));
+                tracing_appender::non_blocking(file)
+            }
             Err(_) => tracing_appender::non_blocking(std::io::stderr()),
         }
     };
