@@ -328,6 +328,7 @@ pub struct App {
     pub(crate) watchlist_cursor: usize,
     pub(crate) trail_len: usize,
     pub(crate) site: Option<SiteLocation>,
+    pub(crate) demo_mode: bool,
     pub(crate) radar_range_nm: f64,
     pub(crate) radar_aspect: f64,
     pub(crate) radar_renderer: RadarRenderer,
@@ -403,6 +404,7 @@ impl App {
         trail_len: usize,
         favorites_path: Option<PathBuf>,
         site: Option<SiteLocation>,
+        demo_mode: bool,
         radar_range_nm: f64,
         radar_aspect: f64,
         radar_renderer: RadarRenderer,
@@ -483,6 +485,7 @@ impl App {
             watchlist_cursor: 0,
             trail_len: trail_len.max(1),
             site,
+            demo_mode,
             radar_range_nm: radar_range_nm.max(1.0),
             radar_aspect: radar_aspect.max(0.2),
             radar_renderer,
@@ -1229,7 +1232,11 @@ impl App {
     }
 
     pub fn site(&self) -> Option<SiteLocation> {
-        self.site
+        if self.demo_mode {
+            None
+        } else {
+            self.site
+        }
     }
 
     pub fn route_for(&self, ac: &Aircraft) -> Option<&RouteInfo> {
@@ -1768,7 +1775,7 @@ impl App {
     }
 
     fn update_notifications(&mut self, data: &ApiResponse, now: SystemTime) {
-        let Some(site) = self.site else {
+        let Some(site) = self.site() else {
             return;
         };
         let radius = self.notify_radius_mi;
@@ -2364,6 +2371,11 @@ fn default_config_items() -> Vec<ConfigItem> {
     push_item("site_lat", ConfigKind::Float, "".to_string());
     push_item("site_lon", ConfigKind::Float, "".to_string());
     push_item("site_alt_m", ConfigKind::Float, "".to_string());
+    push_item(
+        "demo_mode",
+        ConfigKind::Bool,
+        config::DEFAULT_DEMO_MODE.to_string(),
+    );
     push_item("route_enabled", ConfigKind::Bool, "true".to_string());
     push_item(
         "route_base",
@@ -2698,6 +2710,7 @@ mod tests {
             3,
             None,
             None,
+            false,
             200.0,
             1.0,
             crate::app::RadarRenderer::Canvas,

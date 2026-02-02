@@ -142,6 +142,7 @@ fn main() -> Result<()> {
             config.trail_len as usize,
             favorites_path.clone(),
             site,
+            config.demo_mode,
             config.radar_range_nm,
             config.radar_aspect,
             radar_renderer,

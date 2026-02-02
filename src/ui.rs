@@ -210,10 +210,15 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
+    let title = if app.demo_mode {
+        "FEED (DEMO)"
+    } else {
+        "FEED"
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title("FEED");
+        .title(title);
     let paragraph = Paragraph::new(vec![line_top, line_bottom])
         .block(block)
         .style(Style::default().bg(theme.panel_bg));
@@ -629,6 +634,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
                 app.altitude_trend_arrows,
                 app.track_arrows,
                 app.flag_style,
+                app.demo_mode,
             )
         });
 
@@ -680,8 +686,11 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let vs = fmt_i64(ac.baro_rate, 0);
         let qnh = fmt_f64(ac.nav_qnh, 0, 1);
         let mcp = fmt_i64(ac.nav_altitude_mcp, 0);
-        let lat = fmt_f64(ac.lat, 0, 4);
-        let lon = fmt_f64(ac.lon, 0, 4);
+        let (lat, lon) = if app.demo_mode {
+            ("--".to_string(), "--".to_string())
+        } else {
+            (fmt_f64(ac.lat, 0, 4), fmt_f64(ac.lon, 0, 4))
+        };
         let seen = fmt_f64(seen_seconds(ac), 0, 1);
         let msgs = fmt_u64(ac.messages, 0);
         let cat = ac.category.as_deref().unwrap_or("--");
@@ -704,20 +713,24 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             route_info.map(route_display).unwrap_or("--".to_string())
         };
         let trail = app.trail_for(ac).unwrap_or(&[]);
-        let trail_preview = trail
-            .iter()
-            .rev()
-            .take(3)
-            .map(|point| {
-                format!(
-                    "{} {:+.3},{:+.3}",
-                    format_time_short(point.at),
-                    point.lat,
-                    point.lon
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" | ");
+        let trail_preview = if app.demo_mode {
+            "--".to_string()
+        } else {
+            trail
+                .iter()
+                .rev()
+                .take(3)
+                .map(|point| {
+                    format!(
+                        "{} {:+.3},{:+.3}",
+                        format_time_short(point.at),
+                        point.lat,
+                        point.lon
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
         let (dist, brg) = match (app.site(), ac.lat, ac.lon) {
             (Some(site), Some(lat), Some(lon)) => (
                 format!("{:.1} nm", distance_nm(site.lat, site.lon, lat, lon)),
@@ -1116,6 +1129,12 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
 
     for (i, item) in app.config_items.iter().enumerate().take(end).skip(start) {
         let mut value = item.value.clone();
+        if app.demo_mode
+            && matches!(item.key.as_str(), "site_lat" | "site_lon" | "site_alt_m")
+            && !(app.config_editing && i == app.config_cursor)
+        {
+            value = "hidden".to_string();
+        }
         if app.config_editing && i == app.config_cursor {
             value = format!("{}_", app.config_edit);
         }
@@ -1685,8 +1704,20 @@ fn compute_column_widths(
                 }
                 ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
                 ColumnId::Trk => format_track_cell(ac.track, app.track_arrows),
-                ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
-                ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
+                ColumnId::Lat => {
+                    if app.demo_mode {
+                        "--".to_string()
+                    } else {
+                        fmt_f64(ac.lat, 0, 2)
+                    }
+                }
+                ColumnId::Lon => {
+                    if app.demo_mode {
+                        "--".to_string()
+                    } else {
+                        fmt_f64(ac.lon, 0, 2)
+                    }
+                }
                 ColumnId::Dist => fmt_distance(app.site(), ac, 0),
                 ColumnId::Brg => fmt_bearing(app.site(), ac, 0),
                 ColumnId::Seen => fmt_f64(seen_seconds(ac), 0, 0),
@@ -1778,6 +1809,7 @@ fn cell_for_column(
     altitude_trend_arrows: bool,
     track_arrows: bool,
     flag_style: FlagStyle,
+    demo_mode: bool,
 ) -> Cell<'static> {
     let mut text = match id {
         ColumnId::Fav => {
@@ -1807,8 +1839,20 @@ fn cell_for_column(
         ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, altitude_trend_arrows, 0),
         ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
         ColumnId::Trk => format_track_cell(ac.track, track_arrows),
-        ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
-        ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
+        ColumnId::Lat => {
+            if demo_mode {
+                "--".to_string()
+            } else {
+                fmt_f64(ac.lat, 0, 2)
+            }
+        }
+        ColumnId::Lon => {
+            if demo_mode {
+                "--".to_string()
+            } else {
+                fmt_f64(ac.lon, 0, 2)
+            }
+        }
         ColumnId::Dist => fmt_distance(site, ac, 0),
         ColumnId::Brg => fmt_bearing(site, ac, 0),
         ColumnId::Seen => fmt_f64(seen, 0, 0),
