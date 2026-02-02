@@ -132,24 +132,20 @@ pub fn run_app(
                         KeyCode::Char('C') => app.open_config(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
-                        KeyCode::Char('e') => {
-                            match export::export_csv(&app, &indices) {
-                                Ok(path) => {
-                                    info!("export csv {}", path);
-                                    app.set_last_export(path);
-                                }
-                                Err(err) => error!("export csv failed: {err}"),
+                        KeyCode::Char('e') => match export::export_csv(&app, &indices) {
+                            Ok(path) => {
+                                info!("export csv {}", path);
+                                app.set_last_export(path);
                             }
-                        }
-                        KeyCode::Char('E') => {
-                            match export::export_json(&app) {
-                                Ok(path) => {
-                                    info!("export json {}", path);
-                                    app.set_last_export(path);
-                                }
-                                Err(err) => error!("export json failed: {err}"),
+                            Err(err) => error!("export csv failed: {err}"),
+                        },
+                        KeyCode::Char('E') => match export::export_json(&app) {
+                            Ok(path) => {
+                                info!("export json {}", path);
+                                app.set_last_export(path);
                             }
-                        }
+                            Err(err) => error!("export json failed: {err}"),
+                        },
                         _ => {}
                     },
                     InputMode::Filter => match key.code {

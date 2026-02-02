@@ -954,9 +954,7 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
 fn print_help() {
     println!("adsb-tui");
     println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
-    println!(
-        "       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]"
-    );
+    println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
     println!("       [--api-key KEY] [--api-key-header NAME]");
     println!("       [--watchlist] [--no-watchlist] [--watchlist-file PATH]");
     println!("       [--log] [--no-log] [--log-level LEVEL] [--log-file PATH]");
