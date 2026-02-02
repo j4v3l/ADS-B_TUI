@@ -81,7 +81,7 @@ Create an `adsb-tui.toml` file in the same directory as the binary:
 # ADS-B data source URL
 url = "http://your-adsb-receiver/data/aircraft.json"
 
-# Refresh interval in seconds (0 = fetch once)
+# Refresh interval in seconds (0 = fast refresh, clamped to 200ms)
 refresh_secs = 1
 
 # Allow insecure HTTPS connections
@@ -132,7 +132,7 @@ smooth_mode = true
 | Option | Description | Default |
 |--------|-------------|---------|
 | `url` | ADS-B data source URL | Required |
-| `refresh_secs` | Data refresh interval (0 = fetch once) | 0 |
+| `refresh_secs` | Data refresh interval (0 = fast refresh, clamped to 200ms) | 2 |
 | `insecure` | Allow self-signed certificates | false |
 | `stale_secs` | Mark data as stale after this many seconds | 60 |
 | `hide_stale` | Hide stale aircraft from the table | false |
