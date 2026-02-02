@@ -87,6 +87,9 @@ refresh_secs = 1
 # Allow insecure HTTPS connections
 insecure = false
 
+# Allow http:// URLs (explicit override)
+allow_http = true
+
 # Data staleness threshold in seconds
 stale_secs = 60
 hide_stale = false
@@ -127,6 +130,8 @@ smooth_mode = true
 
 ```
 
+API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app config editor does not persist `api_key`.
+
 ### Configuration Options
 
 | Option | Description | Default |
@@ -134,6 +139,8 @@ smooth_mode = true
 | `url` | ADS-B data source URL | Required |
 | `refresh_secs` | Data refresh interval (0 = fast refresh, clamped to 200ms) | 2 |
 | `insecure` | Allow self-signed certificates | false |
+| `allow_http` | Allow http:// URLs | false |
+| `allow_insecure` | Allow --insecure | false |
 | `stale_secs` | Mark data as stale after this many seconds | 60 |
 | `hide_stale` | Hide stale aircraft from the table | false |
 | `low_nic` | Minimum NIC value to display | 5 |
@@ -291,6 +298,8 @@ https://adsbexchange.com/api/aircraft/json/
 # FlightAware (requires API key)
 https://flightaware.com/live/api/
 ```
+
+If you use `http://` sources, set `allow_http = true` or export `ADSB_ALLOW_HTTP=1`.
 
 ## 🤝 Contributing
 

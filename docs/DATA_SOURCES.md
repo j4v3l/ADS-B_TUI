@@ -16,6 +16,8 @@ To receive ADS-B data, you'll need:
 
 ## Popular ADS-B Receivers
 
+Note: If your data source uses `http://`, set `allow_http = true` in `adsb-tui.toml` or export `ADSB_ALLOW_HTTP=1`.
+
 ### 1. RTL-SDR with dump1090
 
 **Hardware:**
@@ -39,6 +41,7 @@ make
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 1
+allow_http = true
 ```
 
 ### 2. readsb (Modern Alternative)
@@ -64,6 +67,7 @@ JSON_OPTIONS="--json-location-accuracy 2"
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 1
+allow_http = true
 ```
 
 ### 3. ADS-B Exchange Feeder
@@ -88,16 +92,14 @@ refresh_secs = 2
 ```toml
 url = "https://adsbexchange.com/api/aircraft/v2/lat/40.7128/lon/-74.0060/dist/250/"
 refresh_secs = 5
-api_key = "YOUR_API_KEY"
-api_key_header = "api-auth"
+# Set API key via env: ADSB_API_KEY=YOUR_API_KEY ADSB_API_KEY_HEADER=api-auth
 ```
 
 **With API key (higher limits):**
 ```toml
 url = "https://adsbexchange.com/api/aircraft/v2/lat/40.7128/lon/-74.0060/dist/250/?apiKey=YOUR_API_KEY"
 refresh_secs = 1
-api_key = "YOUR_API_KEY"
-api_key_header = "api-auth"
+# Set API key via env: ADSB_API_KEY=YOUR_API_KEY ADSB_API_KEY_HEADER=api-auth
 ```
 
 ### OpenSky Network
