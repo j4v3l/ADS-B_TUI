@@ -28,15 +28,18 @@ pub fn spawn_fetcher(
             }
         };
 
+        let sleep = if refresh.is_zero() {
+            Duration::from_millis(200)
+        } else {
+            refresh
+        };
         loop {
             let result = fetch_once(&client, &url, api_key.as_deref(), api_key_header.as_deref());
             if tx.send(result).is_err() {
                 debug!("receiver dropped, exiting fetcher");
                 break;
             }
-            if refresh > Duration::from_secs(0) {
-                thread::sleep(refresh);
-            }
+            thread::sleep(sleep);
         }
     });
 }

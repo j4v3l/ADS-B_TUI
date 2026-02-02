@@ -18,7 +18,7 @@ Create a file named `adsb-tui.toml` with your settings:
 # ADS-B data source URL (required)
 url = "http://your-adsb-receiver:8080/data/aircraft.json"
 
-# Refresh interval in seconds (0 = fetch once)
+# Refresh interval in seconds (0 = fast refresh, clamped to 200ms)
 refresh_secs = 1
 
 # Allow insecure HTTPS connections
@@ -32,7 +32,7 @@ insecure = false
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `url` | string | *required* | URL of your ADS-B data source |
-| `refresh_secs` | number | 0 | How often to fetch new data (0 = fetch once) |
+| `refresh_secs` | number | 2 | How often to fetch new data (0 = fast refresh, clamped to 200ms) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
 | `stale_secs` | number | 60 | Mark aircraft as stale after this many seconds |
 | `hide_stale` | boolean | false | Hide stale aircraft from the table |
