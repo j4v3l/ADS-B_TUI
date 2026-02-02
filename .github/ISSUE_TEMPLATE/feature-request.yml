@@ -2,6 +2,7 @@
 name: Feature Request
 description: Suggest a new feature or enhancement
 title: "[FEATURE] "
+assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
@@ -15,7 +16,7 @@ body:
     attributes:
       label: Feature Summary
       description: A brief description of the feature you'd like to see.
-      placeholder: "Add support for..."
+      placeholder: "Example: Add support for exporting flights to GeoJSON"
     validations:
       required: true
 
@@ -24,7 +25,7 @@ body:
     attributes:
       label: Problem/Use Case
       description: What problem would this feature solve? What's your use case?
-      placeholder: "Currently, when I... I have to..."
+      placeholder: "Example: Currently I must copy data manually; automation would save time"
     validations:
       required: true
 
@@ -33,7 +34,7 @@ body:
     attributes:
       label: Proposed Solution
       description: How would you like this feature to work?
-      placeholder: "I think it would work like this..."
+      placeholder: "Example: Add a CLI flag `--export geojson` that writes to disk"
     validations:
       required: true
 
