@@ -295,7 +295,7 @@ fn split_route(route: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_routes, parse_route_object, split_route};
+    use super::{parse_route_object, parse_routes, split_route};
     use serde_json::json;
 
     #[test]

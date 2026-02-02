@@ -210,10 +210,8 @@ mod tests {
 
     #[test]
     fn parse_numeric_fallbacks() {
-        let data: ApiResponse = serde_json::from_str(
-            r#"{"now": 123.9, "messages": "42", "aircraft": []}"#,
-        )
-        .unwrap();
+        let data: ApiResponse =
+            serde_json::from_str(r#"{"now": 123.9, "messages": "42", "aircraft": []}"#).unwrap();
         assert_eq!(data.now, Some(123));
         assert_eq!(data.messages, Some(42));
     }
