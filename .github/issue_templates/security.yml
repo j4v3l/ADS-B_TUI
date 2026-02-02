@@ -2,8 +2,6 @@
 name: Security Vulnerability
 description: Report a security vulnerability
 title: "[SECURITY] "
-labels: ["security", "vulnerability"]
-assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
