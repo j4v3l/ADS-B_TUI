@@ -2,6 +2,7 @@ use serde_json::{Map, Value};
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use std::time::Duration;
+use tracing::{debug, error, info};
 
 #[derive(Clone, Debug)]
 pub struct RouteRequest {
@@ -34,6 +35,7 @@ pub fn spawn_route_fetcher(
     rx: Receiver<Vec<RouteRequest>>,
 ) {
     thread::spawn(move || {
+        info!("route fetcher started");
         let client = match reqwest::blocking::Client::builder()
             .danger_accept_invalid_certs(insecure)
             .timeout(timeout)
@@ -41,6 +43,7 @@ pub fn spawn_route_fetcher(
         {
             Ok(client) => client,
             Err(err) => {
+                error!("route client error: {err}");
                 let _ = tx.send(RouteMessage::Error(format!("Route client error: {err}")));
                 return;
             }
@@ -52,6 +55,7 @@ pub fn spawn_route_fetcher(
                 fetch_tar1090(&client, &base_url, &route_path)
             } else {
                 if batch.is_empty() {
+                    debug!("route fetch skipped (empty batch)");
                     continue;
                 }
                 fetch_routeset(&client, &base_url, &batch)
@@ -59,9 +63,11 @@ pub fn spawn_route_fetcher(
 
             match result {
                 Ok(results) => {
+                    debug!("route fetch ok: {} results", results.len());
                     let _ = tx.send(RouteMessage::Results(results));
                 }
                 Err(err) => {
+                    error!("route fetch error: {err}");
                     let _ = tx.send(RouteMessage::Error(err));
                 }
             }
@@ -83,25 +89,29 @@ fn fetch_routeset(
     let mut last_err = None;
 
     let payloads = vec![
-        serde_json::json!(callsigns),
-        serde_json::json!({ "callsigns": callsigns }),
-        serde_json::json!({ "callsign": callsigns }),
         serde_json::json!({
             "planes": batch.iter().map(|req| {
                 serde_json::json!({
                     "callsign": req.callsign.trim().to_ascii_uppercase(),
-                    "flight": req.callsign.trim().to_ascii_uppercase(),
                     "lat": req.lat,
-                    "lon": req.lon
+                    "lng": req.lon
                 })
             }).collect::<Vec<_>>()
         }),
+        serde_json::json!(callsigns),
+        serde_json::json!({ "callsigns": callsigns }),
+        serde_json::json!({ "callsign": callsigns }),
     ];
 
     for payload in payloads {
         match post_payload(client, &url, &payload) {
             Ok(body) => return Ok(parse_routes(body)),
-            Err(err) => last_err = Some(err),
+            Err(err) => {
+                if is_rate_limited_message(&err) {
+                    return Err(err);
+                }
+                last_err = Some(err)
+            }
         }
     }
 
@@ -141,7 +151,16 @@ fn post_payload(
     if !status.is_success() {
         return Err(format!("Route HTTP {}", status));
     }
-    resp.json::<Value>().map_err(|err| err.to_string())
+    let body: Value = resp.json::<Value>().map_err(|err| err.to_string())?;
+    Ok(body)
+}
+
+fn is_rate_limited_message(message: &str) -> bool {
+    let msg = message.to_ascii_lowercase();
+    msg.contains(" 429")
+        || msg.contains("429 ")
+        || msg.contains("too many requests")
+        || msg.contains("rate limit")
 }
 
 fn parse_routes(body: Value) -> Vec<RouteResult> {
@@ -213,23 +232,32 @@ fn parse_route_object(value: &Value, key_callsign: Option<&String>) -> Option<Ro
         .or_else(|| key_callsign.cloned())
         .map(|v| v.trim().to_string())?;
 
-    let route_text = extract_string(obj, &["route", "flightroute"]);
+    let route_text = extract_string(
+        obj,
+        &[
+            "route",
+            "flightroute",
+            "_airport_codes_iata",
+            "airport_codes",
+        ],
+    );
     let origin = extract_string(obj, &["origin", "orig", "from", "departure", "dep"]);
     let destination = extract_string(obj, &["destination", "dest", "to", "arrival", "arr"]);
     let alt_origin = extract_string(obj, &["airport1", "from_iata", "from_icao"]);
     let alt_dest = extract_string(obj, &["airport2", "to_iata", "to_icao"]);
 
-    let (origin, destination, route_text) = match (origin.or(alt_origin), destination.or(alt_dest), route_text) {
-        (Some(o), Some(d), r) => (Some(o), Some(d), r),
-        (None, None, Some(r)) => {
-            if let Some((o, d)) = split_route(&r) {
-                (Some(o), Some(d), Some(r))
-            } else {
-                (None, None, Some(r))
+    let (origin, destination, route_text) =
+        match (origin.or(alt_origin), destination.or(alt_dest), route_text) {
+            (Some(o), Some(d), r) => (Some(o), Some(d), r),
+            (None, None, Some(r)) => {
+                if let Some((o, d)) = split_route(&r) {
+                    (Some(o), Some(d), Some(r))
+                } else {
+                    (None, None, Some(r))
+                }
             }
-        }
-        other => other,
-    };
+            other => other,
+        };
 
     Some(RouteResult {
         callsign: callsign.trim().to_string(),
@@ -263,4 +291,64 @@ fn split_route(route: &str) -> Option<(String, String)> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_routes, parse_route_object, split_route};
+    use serde_json::json;
+
+    #[test]
+    fn parse_routes_from_array() {
+        let body = json!([
+            {
+                "callsign": "AAL1",
+                "origin": "KJFK",
+                "destination": "KMIA",
+                "route": "KJFK-KMIA"
+            }
+        ]);
+        let results = parse_routes(body);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].callsign, "AAL1");
+        assert_eq!(results[0].origin.as_deref(), Some("KJFK"));
+        assert_eq!(results[0].destination.as_deref(), Some("KMIA"));
+        assert_eq!(results[0].route.as_deref(), Some("KJFK-KMIA"));
+    }
+
+    #[test]
+    fn parse_routes_from_map() {
+        let body = json!({
+            "routes": {
+                "DAL2": "KLAX-KATL"
+            }
+        });
+        let results = parse_routes(body);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].callsign, "DAL2");
+        assert_eq!(results[0].route.as_deref(), Some("KLAX-KATL"));
+    }
+
+    #[test]
+    fn parse_route_object_with_alts() {
+        let value = json!({
+            "call": "TEST3",
+            "airport1": "KSFO",
+            "airport2": "KSEA"
+        });
+        let result = parse_route_object(&value, None).unwrap();
+        assert_eq!(result.callsign, "TEST3");
+        assert_eq!(result.origin.as_deref(), Some("KSFO"));
+        assert_eq!(result.destination.as_deref(), Some("KSEA"));
+    }
+
+    #[test]
+    fn split_route_parsing() {
+        assert_eq!(
+            split_route("KDEN-KORD"),
+            Some(("KDEN".to_string(), "KORD".to_string()))
+        );
+        assert_eq!(split_route("INVALID"), None);
+        assert_eq!(split_route(" - "), None);
+    }
 }

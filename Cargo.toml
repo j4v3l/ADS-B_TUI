@@ -2,6 +2,18 @@
 name = "adsb-tui"
 version = "0.1.0"
 edition = "2021"
+authors = ["ADS-B TUI Contributors"]
+description = "A modern terminal user interface for tracking aircraft using ADS-B data"
+license = "ADS-B-TUI-Non-Commercial"
+readme = "README.md"
+homepage = "https://github.com/j4v3l/adsb-tui"
+repository = "https://github.com/j4v3l/adsb-tui"
+keywords = ["ads-b", "aviation", "terminal", "tui", "aircraft", "tracking"]
+categories = ["command-line-utilities", "visualization"]
+exclude = ["assets/", "docs/"]
+
+[features]
+net-tests = []
 
 [dependencies]
 anyhow = "1.0"
@@ -12,3 +24,7 @@ reqwest = { version = "0.11", features = ["json", "blocking"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+toml_edit = "0.22"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "chrono"] }

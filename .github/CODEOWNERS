@@ -1,0 +1,10 @@
+# Code owners for ADS-B TUI
+# This file defines who owns and maintains different parts of the codebase
+
+# Global owners - all files
+* @j4v3l
+
+# Specific areas (if needed in the future)
+# src/ui.rs @j4v3l
+# src/net.rs @j4v3l
+# docs/ @j4v3l

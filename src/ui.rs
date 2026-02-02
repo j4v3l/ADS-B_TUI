@@ -2,14 +2,13 @@ use chrono::{DateTime, Local, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap,
-};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::app::{App, ColumnId, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
+use crate::app::{App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir};
 use crate::model::seen_seconds;
+use crate::radar::{self, RadarSettings, RadarTheme};
 
 struct Theme {
     accent: Color,
@@ -19,6 +18,7 @@ struct Theme {
     highlight_fg: Color,
     highlight_bg: Color,
     fav: Color,
+    watch: Color,
     row_even_bg: Color,
     row_odd_bg: Color,
     header_bg: Color,
@@ -43,6 +43,7 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
     match app.layout_mode {
         LayoutMode::Full => render_full_body(f, chunks[2], app, indices),
         LayoutMode::Compact => render_compact_body(f, chunks[2], app, indices),
+        LayoutMode::Radar => render_radar_body(f, chunks[2], app, indices),
     }
 
     render_footer(f, chunks[3], app);
@@ -53,6 +54,18 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
 
     if app.input_mode == InputMode::Help {
         render_help_menu(f, size, app);
+    }
+
+    if app.input_mode == InputMode::Config {
+        render_config_menu(f, size, app);
+    }
+
+    if app.input_mode == InputMode::Legend {
+        render_legend_menu(f, size, app);
+    }
+
+    if app.input_mode == InputMode::Watchlist {
+        render_watchlist_menu(f, size, app);
     }
 }
 
@@ -82,10 +95,18 @@ fn render_compact_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usiz
     render_table(f, area, app, indices);
 }
 
+fn render_radar_body(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
+    render_radar(f, area, app, indices);
+}
+
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let count = app.data.aircraft.len();
     let msg_total = app.data.messages.unwrap_or(0);
+    let total_rate = app.msg_rate_display();
+    let avg_rate = app.avg_aircraft_rate();
+    let total_kbps = total_rate.map(|rate| rate * 112.0 / 1000.0);
+    let avg_kbps = avg_rate.map(|rate| rate * 112.0 / 1000.0);
 
     let api_time = app
         .data
@@ -110,28 +131,56 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Color::Green
     };
 
-    let spinner = ["|", "/", "-", "\\"][app.tick as usize % 4];
-    let blink = app
+    let spinner = ["|", "/", "-", "\\"][phase_index(200, 4)];
+    let since_update_ms = app
         .last_update
         .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .map(|d| d.as_millis() < 900)
-        .unwrap_or(false);
-    let sync_style = if blink {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.dim)
+        .map(|d| d.as_millis() as u64);
+    let sync_style = match since_update_ms {
+        Some(ms) if ms < 1200 => {
+            if phase_ms(500) {
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.accent)
+            }
+        }
+        _ => Style::default().fg(theme.dim),
     };
 
-    let line = Line::from(vec![
+    let total_text = match (total_rate, total_kbps) {
+        (Some(rate), Some(kbps)) => format!("{rate:.1}/s {kbps:.1}kbps"),
+        (Some(rate), None) => format!("{rate:.1}/s"),
+        _ => "--".to_string(),
+    };
+    let avg_text = match (avg_rate, avg_kbps) {
+        (Some(rate), Some(kbps)) => format!("{rate:.1}/s {kbps:.1}kbps"),
+        (Some(rate), None) => format!("{rate:.1}/s"),
+        _ => "--".to_string(),
+    };
+
+    let line_top = Line::from(vec![
         Span::styled(
             "ADSB BOARD",
-            Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
-        Span::styled(format!("AIRCRAFT {count}"), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("AIRCRAFT {count}"),
+            Style::default().fg(Color::Cyan),
+        ),
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
+        Span::styled(format!("TOT {total_text}"), Style::default().fg(theme.accent)),
+        Span::raw(" | "),
+        Span::styled(format!("AVG {avg_text}"), Style::default().fg(theme.dim)),
+    ]);
+
+    let line_bottom = Line::from(vec![
         Span::raw(format!("API {api_time}")),
         Span::raw(" | "),
         Span::raw(format!("SORT {}", app.sort.label())),
@@ -144,14 +193,33 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(" | "),
         Span::styled(format!("SYNC {spinner}"), sync_style),
         Span::raw(" | "),
-        Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" | "),
+        Span::styled("MENU ", Style::default().fg(theme.dim)),
+        Span::styled("[s]Sort ", Style::default().fg(theme.dim)),
+        Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
+        Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
+        Span::styled("[C]Config ", Style::default().fg(theme.dim)),
+        Span::styled("[W]Watch ", Style::default().fg(theme.dim)),
+        Span::styled("[L]Legend ", Style::default().fg(theme.dim)),
+        Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
+    let title = if app.demo_mode {
+        "FEED (DEMO)"
+    } else {
+        "FEED"
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title("FEED");
-    let paragraph = Paragraph::new(line)
+        .title(title);
+    let paragraph = Paragraph::new(vec![line_top, line_bottom])
         .block(block)
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, area);
@@ -233,11 +301,18 @@ fn render_alerts(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     spans.extend(alert_span("LOWNIC", low_nic, theme.warn));
     spans.extend(alert_span("LOWNAC", low_nac, theme.warn));
     spans.extend(alert_span("FAV", favs, theme.fav));
-    spans.extend(alert_span("NEAR", near, theme.accent));
+    let near_color = if phase_ms(800) {
+        theme.accent
+    } else {
+        theme.warn
+    };
+    spans.extend(alert_span("NEAR", near, near_color));
     spans.extend(alert_span("RERR", route_err, theme.danger));
 
     let filter_style = if app.input_mode == InputMode::Filter {
-        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.dim)
     };
@@ -268,8 +343,10 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let now = SystemTime::now();
     let visible = indices.len();
     let total = app.data.aircraft.len();
-    let msg_rate = app.msg_rate;
-    let kbps = msg_rate.map(|rate| rate * 112.0 / 1000.0);
+    let msg_rate_total = app.msg_rate_display();
+    let msg_rate_avg = app.avg_aircraft_rate();
+    let kbps_total = msg_rate_total.map(|rate| rate * 112.0 / 1000.0);
+    let kbps_avg = msg_rate_avg.map(|rate| rate * 112.0 / 1000.0);
     let uptime = now
         .duration_since(app.start_time)
         .map(format_duration)
@@ -278,10 +355,6 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         .last_update
         .and_then(|t| now.duration_since(t).ok())
         .map(|d| format!("{}s", d.as_secs()))
-        .unwrap_or_else(|| "--".to_string());
-    let site_alt = app
-        .site()
-        .map(|site| format!("{:.1} m", site.alt_m))
         .unwrap_or_else(|| "--".to_string());
     let route_error = app
         .route_error
@@ -297,10 +370,9 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let mut last_1 = 0usize;
     let mut last_5 = 0usize;
     let mut last_15 = 0usize;
-
-    for time in app.seen_times.values() {
-        if let Ok(delta) = now.duration_since(*time) {
-            let secs = delta.as_secs();
+    for ac in &app.data.aircraft {
+        if let Some(secs) = seen_seconds(ac) {
+            let secs = secs.max(0.0) as u64;
             if secs <= 60 {
                 last_1 += 1;
             }
@@ -313,49 +385,35 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         }
     }
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled("VISIBLE ", Style::default().fg(theme.dim)),
-            Span::styled(
-                format!("{visible}/{total}"),
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("MSG RATE ", Style::default().fg(theme.dim)),
-            Span::raw(match msg_rate {
-                Some(value) => format!("{value:.1}/s"),
-                None => "--".to_string(),
-            }),
-        ]),
-        Line::from(vec![
-            Span::styled("EST KBPS ", Style::default().fg(theme.dim)),
-            Span::raw(match kbps {
-                Some(value) => format!("{value:.1}"),
-                None => "--".to_string(),
-            }),
-        ]),
-        Line::from(vec![
-            Span::styled("SEEN 1/5/15 ", Style::default().fg(theme.dim)),
-            Span::raw(format!("{last_1}/{last_5}/{last_15}")),
-        ]),
-        Line::from(vec![
-            Span::styled("UPTIME ", Style::default().fg(theme.dim)),
-            Span::raw(uptime),
-        ]),
-        Line::from(vec![
-            Span::styled("LAST UPD ", Style::default().fg(theme.dim)),
-            Span::raw(last_update),
-        ]),
-        Line::from(vec![
-            Span::styled("SITE ALT ", Style::default().fg(theme.dim)),
-            Span::raw(site_alt),
-        ]),
-        Line::from(vec![
-            Span::styled("ROUTE ERR ", Style::default().fg(theme.dim)),
-            Span::raw(route_error),
-        ]),
-    ];
+    let ctx = StatsContext {
+        visible,
+        total,
+        msg_total: app.data.messages.unwrap_or(0),
+        msg_rate_total,
+        msg_rate_avg,
+        kbps_total,
+        kbps_avg,
+        last_1,
+        last_5,
+        last_15,
+        uptime,
+        last_update,
+        route_error,
+        site_alt: app
+            .site()
+            .map(|site| format!("{:.1} m", site.alt_m))
+            .unwrap_or_else(|| "--".to_string()),
+    };
+
+    let mut lines = Vec::new();
+    lines.push(stat_line("visible", &ctx, &theme, true));
+    for key in &app.stats_metrics {
+        lines.push(stat_line(key, &ctx, &theme, false));
+    }
+    lines.push(stat_line("seen_1_5_15", &ctx, &theme, false));
+    lines.push(stat_line("uptime", &ctx, &theme, false));
+    lines.push(stat_line("last_update", &ctx, &theme, false));
+    lines.push(stat_line("route_err", &ctx, &theme, false));
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -367,85 +425,114 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     f.render_widget(paragraph, area);
 }
 
+struct StatsContext {
+    visible: usize,
+    total: usize,
+    msg_total: u64,
+    msg_rate_total: Option<f64>,
+    msg_rate_avg: Option<f64>,
+    kbps_total: Option<f64>,
+    kbps_avg: Option<f64>,
+    last_1: usize,
+    last_5: usize,
+    last_15: usize,
+    uptime: String,
+    last_update: String,
+    route_error: String,
+    site_alt: String,
+}
+
+fn stat_line(key: &str, ctx: &StatsContext, theme: &Theme, emphasize: bool) -> Line<'static> {
+    let key = key.trim().to_ascii_lowercase();
+    let label = format!("{:<11}", stat_label(&key));
+    let value = stat_value(&key, ctx);
+    let label_style = if emphasize {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.dim)
+    };
+    let value_style = if emphasize {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.accent)
+    };
+    Line::from(vec![
+        Span::styled(label, label_style),
+        Span::styled(value, value_style),
+    ])
+}
+
+fn stat_label(key: &str) -> String {
+    match key {
+        "visible" => "VISIBLE".to_string(),
+        "aircraft" => "AIRCRAFT".to_string(),
+        "messages" => "MSGS".to_string(),
+        "msg_rate_total" => "TOT MSG/S".to_string(),
+        "msg_rate_avg" => "AVG MSG/S".to_string(),
+        "kbps_total" => "TOT KBPS".to_string(),
+        "kbps_avg" => "AVG KBPS".to_string(),
+        "seen_1_5_15" => "SEEN 1/5/15".to_string(),
+        "uptime" => "UPTIME".to_string(),
+        "last_update" => "LAST UPD".to_string(),
+        "site_alt" => "SITE ALT".to_string(),
+        "route_err" => "ROUTE ERR".to_string(),
+        _ => key.to_ascii_uppercase().replace('_', " "),
+    }
+}
+
+fn stat_value(key: &str, ctx: &StatsContext) -> String {
+    match key {
+        "visible" => format!("{}/{}", ctx.visible, ctx.total),
+        "aircraft" => ctx.total.to_string(),
+        "messages" => ctx.msg_total.to_string(),
+        "msg_rate_total" => fmt_rate(ctx.msg_rate_total),
+        "msg_rate_avg" => fmt_rate(ctx.msg_rate_avg),
+        "kbps_total" => fmt_kbps(ctx.kbps_total),
+        "kbps_avg" => fmt_kbps(ctx.kbps_avg),
+        "seen_1_5_15" => format!("{}/{}/{}", ctx.last_1, ctx.last_5, ctx.last_15),
+        "uptime" => ctx.uptime.clone(),
+        "last_update" => ctx.last_update.clone(),
+        "site_alt" => ctx.site_alt.clone(),
+        "route_err" => ctx.route_error.clone(),
+        _ => "--".to_string(),
+    }
+}
+
+fn fmt_rate(value: Option<f64>) -> String {
+    match value {
+        Some(rate) => format!("{rate:.1}/s"),
+        None => "--".to_string(),
+    }
+}
+
+fn fmt_kbps(value: Option<f64>) -> String {
+    match value {
+        Some(rate) => format!("{rate:.1}"),
+        None => "--".to_string(),
+    }
+}
+
 fn render_radar(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     let theme = theme(app.theme_mode);
-    let mut points = Vec::new();
-    let mut sum_lat = 0.0;
-    let mut sum_lon = 0.0;
-    let mut current_points = 0usize;
-
-    for idx in indices {
-        let ac = &app.data.aircraft[*idx];
-        if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
-            points.push((lat, lon, app.is_favorite(ac), true));
-            sum_lat += lat;
-            sum_lon += lon;
-            current_points += 1;
-        }
-        if let Some(trail) = app.trail_for(ac) {
-            for point in trail {
-                points.push((point.lat, point.lon, app.is_favorite(ac), false));
-            }
-        }
-    }
-
-    let mut lines = Vec::new();
-    if points.is_empty() || current_points == 0 {
-        lines.push(Line::from("No position data"));
-    } else {
-        let (center_lat, center_lon) = match app.site() {
-            Some(site) => (site.lat, site.lon),
-            None => (sum_lat / current_points as f64, sum_lon / current_points as f64),
-        };
-        let mut max_delta = 0.0001f64;
-        for (lat, lon, _, _) in &points {
-            let dlat = (lat - center_lat).abs();
-            let dlon = (lon - center_lon).abs();
-            max_delta = max_delta.max(dlat.max(dlon));
-        }
-
-        let width = area.width.saturating_sub(2) as usize;
-        let height = area.height.saturating_sub(2) as usize;
-        let width = width.max(1);
-        let height = height.max(1);
-        let mut grid = vec![vec![('.', 0u8); width]; height];
-        let cx = width / 2;
-        let cy = height / 2;
-        set_grid(&mut grid, cx, cy, '+', 1);
-
-        for (lat, lon, fav, current) in points {
-            let dx = (lon - center_lon) / max_delta;
-            let dy = (lat - center_lat) / max_delta;
-            let x = ((dx + 1.0) * 0.5 * (width.saturating_sub(1)) as f64) as isize;
-            let y = ((1.0 - (dy + 1.0) * 0.5) * (height.saturating_sub(1)) as f64) as isize;
-            let xi = x.clamp(0, width.saturating_sub(1) as isize) as usize;
-            let yi = y.clamp(0, height.saturating_sub(1) as isize) as usize;
-            let (ch, prio) = match (fav, current) {
-                (true, true) => ('F', 4),
-                (false, true) => ('*', 3),
-                (true, false) => ('f', 2),
-                (false, false) => ('o', 2),
-            };
-            set_grid(&mut grid, xi, yi, ch, prio);
-        }
-
-        for row in grid {
-            let line: String = row.into_iter().map(|(ch, _)| ch).collect();
-            lines.push(Line::from(Span::styled(
-                line,
-                Style::default().fg(theme.dim),
-            )));
-        }
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .title("RADAR");
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .style(Style::default().bg(theme.panel_bg));
-    f.render_widget(paragraph, area);
+    let radar_theme = RadarTheme {
+        accent: theme.accent,
+        dim: theme.dim,
+        fav: theme.fav,
+        warn: theme.warn,
+        highlight: theme.highlight_bg,
+        panel_bg: theme.panel_bg,
+    };
+    let settings = RadarSettings {
+        range_nm: app.radar_range_nm,
+        aspect: app.radar_aspect,
+        renderer: app.radar_renderer,
+        blip: app.radar_blip,
+    };
+    radar::render(f, area, app, indices, radar_theme, settings);
 }
 
 fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
@@ -457,7 +544,20 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         return;
     }
 
-    let widths = compute_column_widths(app, &columns, indices, available_width);
+    let now = SystemTime::now();
+    let column_ids: Vec<ColumnId> = columns.iter().map(|col| col.id).collect();
+    let widths = app
+        .column_cache_lookup(available_width, &column_ids, indices.len(), now)
+        .unwrap_or_else(|| compute_column_widths(app, &columns, indices, available_width));
+    if app.column_cache_enabled {
+        app.column_cache_store(
+            available_width,
+            column_ids,
+            indices.len(),
+            widths.clone(),
+            now,
+        );
+    }
     let header_cells = columns.iter().zip(widths.iter()).map(|(col, width)| {
         let text = center_text(col.label, *width as usize);
         Cell::from(text).style(
@@ -472,11 +572,15 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .style(Style::default().bg(theme.header_bg))
         .height(1);
 
+    let fresh_pulse = phase_ms(650);
+    let stale_pulse = phase_ms(900);
+
     let rows = indices.iter().enumerate().map(|(i, idx)| {
         let ac = &app.data.aircraft[*idx];
         let seen = seen_seconds(ac);
         let stale = seen.map(|s| s > app.stale_secs).unwrap_or(true);
         let favorite = app.is_favorite(ac);
+        let watchlisted = app.is_watchlisted(ac);
         let trend = app.trend_for(ac);
         let overpass = match (app.site(), ac.lat, ac.lon) {
             (Some(site), Some(lat), Some(lon)) => {
@@ -493,26 +597,44 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
 
         if overpass {
             style = style.fg(Color::Green).add_modifier(Modifier::BOLD);
+        } else if seen.map(|s| s <= 1.0).unwrap_or(false) {
+            style = if fresh_pulse {
+                style
+                    .fg(theme.accent)
+                    .bg(theme.header_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                style.fg(theme.accent)
+            };
         } else if stale {
-            style = if app.tick % 2 == 0 {
+            style = if stale_pulse {
                 style.fg(theme.danger)
             } else {
                 style.fg(theme.dim)
             };
+        } else if watchlisted {
+            style = style.fg(theme.watch).add_modifier(Modifier::BOLD);
         }
 
         let route = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route);
         let cells = columns.iter().zip(widths.iter()).map(|(col, width)| {
             cell_for_column(
                 col.id,
                 *width as usize,
                 ac,
                 favorite,
+                watchlisted,
                 seen,
                 trend,
                 route,
+                route_pending,
                 &theme,
                 app.site(),
+                app.altitude_trend_arrows,
+                app.track_arrows,
+                app.flag_style,
+                app.demo_mode,
             )
         });
 
@@ -524,15 +646,17 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .map(|width| Constraint::Length(*width))
         .collect();
 
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .title("AIRSPACE")
+        .style(Style::default().bg(theme.panel_bg));
+
     let table = Table::new(rows, constraints)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
-                .title("AIRSPACE"),
-        )
+        .block(block)
         .column_spacing(1)
+        .style(Style::default().bg(theme.panel_bg))
         .highlight_style(
             Style::default()
                 .fg(theme.highlight_fg)
@@ -558,12 +682,15 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let alt_baro = fmt_i64(ac.alt_baro, 0);
         let alt_geom = fmt_i64(ac.alt_geom, 0);
         let gs = fmt_f64(ac.gs, 0, 0);
-        let track = fmt_f64(ac.track, 0, 0);
+        let track = format_track_display(ac.track, app.track_arrows);
         let vs = fmt_i64(ac.baro_rate, 0);
         let qnh = fmt_f64(ac.nav_qnh, 0, 1);
         let mcp = fmt_i64(ac.nav_altitude_mcp, 0);
-        let lat = fmt_f64(ac.lat, 0, 4);
-        let lon = fmt_f64(ac.lon, 0, 4);
+        let (lat, lon) = if app.demo_mode {
+            ("--".to_string(), "--".to_string())
+        } else {
+            (fmt_f64(ac.lat, 0, 4), fmt_f64(ac.lon, 0, 4))
+        };
         let seen = fmt_f64(seen_seconds(ac), 0, 1);
         let msgs = fmt_u64(ac.messages, 0);
         let cat = ac.category.as_deref().unwrap_or("--");
@@ -573,22 +700,37 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let sil = fmt_i64(ac.sil, 0);
         let rssi = fmt_f64(ac.rssi, 0, 1);
         let favorite = if app.is_favorite(ac) { "YES" } else { "NO" };
-        let route = app.route_for(ac).map(route_display).unwrap_or("--".to_string());
+        let watch_text = if let Some(entry) = app.watch_entry_for(ac) {
+            format!("YES {}", entry.entry_id())
+        } else {
+            "NO".to_string()
+        };
+        let route_info = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route_info);
+        let route = if route_pending {
+            route_pending_text().to_string()
+        } else {
+            route_info.map(route_display).unwrap_or("--".to_string())
+        };
         let trail = app.trail_for(ac).unwrap_or(&[]);
-        let trail_preview = trail
-            .iter()
-            .rev()
-            .take(3)
-            .map(|point| {
-                format!(
-                    "{} {:+.3},{:+.3}",
-                    format_time_short(point.at),
-                    point.lat,
-                    point.lon
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" | ");
+        let trail_preview = if app.demo_mode {
+            "--".to_string()
+        } else {
+            trail
+                .iter()
+                .rev()
+                .take(3)
+                .map(|point| {
+                    format!(
+                        "{} {:+.3},{:+.3}",
+                        format_time_short(point.at),
+                        point.lat,
+                        point.lon
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
         let (dist, brg) = match (app.site(), ac.lat, ac.lon) {
             (Some(site), Some(lat), Some(lon)) => (
                 format!("{:.1} nm", distance_nm(site.lat, site.lon, lat, lon)),
@@ -602,7 +744,9 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
                 Span::styled("CALLSIGN ", Style::default().fg(theme.dim)),
                 Span::styled(
                     flight,
-                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             Line::from(vec![
@@ -636,6 +780,10 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
                 Span::styled("FAVORITE ", Style::default().fg(theme.dim)),
                 Span::raw(favorite),
             ]),
+            Line::from(vec![
+                Span::styled("WATCH    ", Style::default().fg(theme.dim)),
+                Span::raw(watch_text),
+            ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("ALT B/G  ", Style::default().fg(theme.dim)),
@@ -647,7 +795,7 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             ]),
             Line::from(vec![
                 Span::styled("GS/TRK   ", Style::default().fg(theme.dim)),
-                Span::raw(format!("{gs} kt / {track} deg")),
+                Span::raw(format!("{gs} kt / {track}")),
             ]),
             Line::from(vec![
                 Span::styled("POS      ", Style::default().fg(theme.dim)),
@@ -708,7 +856,13 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
     let width = area.width.saturating_sub(40) as usize;
-    let sweep_pos = if width == 0 { 0 } else { (app.tick as usize) % width };
+    let sweep_period_ms = 3500u64;
+    let sweep_pos = if width == 0 {
+        0
+    } else {
+        let ms = now_ms() % sweep_period_ms;
+        ((ms as usize) * width) / sweep_period_ms as usize
+    };
     let mut sweep = String::with_capacity(width);
     for i in 0..width {
         if i == sweep_pos {
@@ -718,19 +872,9 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = format!(
-        "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  m columns  e export  ? help",
-    );
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  b labels  m columns  w watch  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
-
-    if let Some((name, when)) = &app.last_export {
-        if let Ok(delta) = SystemTime::now().duration_since(*when) {
-            if delta <= Duration::from_secs(5) {
-                help.push_str(&format!("  saved {name}"));
-            }
-        }
-    }
 
     let mut spans = vec![Span::styled(help, Style::default().fg(theme.dim))];
     if let Some(note) = app.latest_notification() {
@@ -740,6 +884,17 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
                 spans.push(Span::styled(
                     format!("ALERT {}", note.message),
                     Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+                ));
+            }
+        }
+    }
+    if let Some((name, when)) = &app.last_export {
+        if let Ok(delta) = SystemTime::now().duration_since(*when) {
+            if delta <= Duration::from_secs(6) {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    format!("SAVED {}", name),
+                    Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
                 ));
             }
         }
@@ -796,29 +951,57 @@ fn render_columns_menu(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
-    let popup = centered_rect(64, 18, area);
+    let popup = centered_rect(70, 20, area);
 
     f.render_widget(Clear, popup);
 
     let lines = vec![
         Line::from(Span::styled(
-            "Keys",
+            "HELP",
             Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
         )),
+        Line::from(Span::styled(
+            "Navigation",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  ↑/↓        Move selection"),
+        Line::from("  Mouse      Scroll to move • Click row to select"),
         Line::from(""),
-        Line::from("q           Quit"),
-        Line::from("Up/Down     Move selection"),
-        Line::from("s           Sort (SEEN/ALT/SPD)"),
-        Line::from("/           Filter (Enter apply, Esc cancel, Ctrl+U clear)"),
-        Line::from("c           Clear filter"),
-        Line::from("f           Toggle favorite (auto-saves)"),
-        Line::from("m           Columns menu"),
-        Line::from("t           Theme toggle"),
-        Line::from("l           Layout toggle"),
-        Line::from("e           Export CSV (visible rows)"),
-        Line::from("E           Export JSON (raw feed)"),
-        Line::from("? or h      Toggle help"),
-        Line::from("Mouse       Scroll to move • Click row to select"),
+        Line::from(Span::styled(
+            "Display",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  s          Sort (SEEN/ALT/SPD)"),
+        Line::from("  l          Toggle layout (full/compact)"),
+        Line::from("  R          Radar layout"),
+        Line::from("  b          Toggle radar labels"),
+        Line::from("  t          Toggle theme"),
+        Line::from("  m          Columns menu"),
+        Line::from("  w          Watchlist"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Filter & Favorites",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  /          Filter (Enter apply, Esc cancel, Ctrl+U clear)"),
+        Line::from("  c          Clear filter"),
+        Line::from("  f          Toggle favorite (auto-saves)"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Export & Config",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  e / E      Export CSV / JSON"),
+        Line::from("  C          Config editor"),
+        Line::from("  W          Watchlist menu"),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Quit",
+            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+        )),
+        Line::from("  q          Quit"),
+        Line::from("  ? / h      Toggle help"),
+        Line::from("  L          Legend"),
         Line::from(""),
         Line::from(Span::styled(
             "Press Esc to close",
@@ -835,6 +1018,313 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         .wrap(Wrap { trim: true })
         .style(Style::default().bg(theme.panel_bg));
     f.render_widget(paragraph, popup);
+}
+
+fn render_legend_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let popup = centered_rect(70, 22, area);
+    f.render_widget(Clear, popup);
+
+    let legend_items = legend_items();
+    let total_items = legend_items.len();
+    let reserved = 5;
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let mut start = if total_items > items_height {
+        app.config_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "LEGEND",
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    for (i, item) in legend_items.iter().enumerate().take(end).skip(start) {
+        let line = if i == app.config_cursor {
+            Line::from(Span::styled(
+                *item,
+                Style::default()
+                    .fg(theme.highlight_fg)
+                    .bg(theme.highlight_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(*item, Style::default().fg(theme.dim)))
+        };
+        lines.push(line);
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Up/Down scroll • L or Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("LEGEND");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let height = (app.config_items.len() + 6).min(24) as u16;
+    let popup = centered_rect(72, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!("CONFIG {}", app.config_path.display()),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    let status_visible = app
+        .config_status
+        .as_ref()
+        .and_then(|(_, when)| SystemTime::now().duration_since(*when).ok())
+        .map(|d| d.as_secs() <= 5)
+        .unwrap_or(false);
+    let reserved = 4 + if status_visible { 1 } else { 0 };
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let total_items = app.config_items.len();
+    let mut start = if total_items > items_height {
+        app.config_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+    let key_width = app
+        .config_items
+        .iter()
+        .skip(start)
+        .take(items_height)
+        .map(|item| item.key.len())
+        .max()
+        .unwrap_or(8)
+        .min(24);
+
+    for (i, item) in app.config_items.iter().enumerate().take(end).skip(start) {
+        let mut value = item.value.clone();
+        if app.demo_mode
+            && matches!(item.key.as_str(), "site_lat" | "site_lon" | "site_alt_m")
+            && !(app.config_editing && i == app.config_cursor)
+        {
+            value = "hidden".to_string();
+        }
+        if app.config_editing && i == app.config_cursor {
+            value = format!("{}_", app.config_edit);
+        }
+        let text = format!("{:width$} = {}", item.key, value, width = key_width);
+        let line = if i == app.config_cursor {
+            Line::from(Span::styled(
+                text,
+                Style::default()
+                    .fg(theme.highlight_fg)
+                    .bg(theme.highlight_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        } else {
+            Line::from(Span::styled(text, Style::default().fg(theme.dim)))
+        };
+        lines.push(line);
+    }
+
+    lines.push(Line::from(""));
+    if let Some((msg, _)) = &app.config_status {
+        if status_visible {
+            lines.push(Line::from(Span::styled(
+                msg,
+                Style::default().fg(theme.warn),
+            )));
+        }
+    }
+    let save_hint = if app.config_dirty { "auto-save on close" } else { "w save" };
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Up/Down select • Enter edit/apply • {save_hint} • Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("CONFIG");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let total_items = app.watchlist_len();
+    let height = (total_items.max(1) + 6).min(24) as u16;
+    let popup = centered_rect(72, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "WATCHLIST",
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    let path_text = app
+        .watchlist_path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "--".to_string());
+    lines.push(Line::from(Span::styled(
+        format!("FILE {path_text}"),
+        Style::default().fg(theme.dim),
+    )));
+    lines.push(Line::from(""));
+
+    let reserved = 4;
+    let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
+    let mut start = if total_items > items_height {
+        app.watchlist_cursor.saturating_sub(items_height / 2)
+    } else {
+        0
+    };
+    if start + items_height > total_items {
+        start = total_items.saturating_sub(items_height);
+    }
+    let end = (start + items_height).min(total_items);
+
+    if total_items == 0 {
+        lines.push(Line::from(Span::styled(
+            "No watchlist entries.",
+            Style::default().fg(theme.dim),
+        )));
+    } else {
+        for (i, entry) in app.watchlist.iter().enumerate().take(end).skip(start) {
+            let enabled = if entry.is_enabled() { "ON " } else { "OFF" };
+            let notify = if entry.notify_enabled() { "N" } else { "-" };
+            let entry_id = entry.entry_id();
+            let label = entry
+                .label
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(entry_id.as_str());
+            let mode = entry.match_mode();
+            let match_text = format!("{}={}", entry.match_type, entry.value);
+            let text = format!(
+                "{enabled} {notify}  {:<18}  {}  ({})",
+                truncate(label, 18),
+                truncate(&match_text, 28),
+                mode
+            );
+            let line = if i == app.watchlist_cursor {
+                Line::from(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(theme.highlight_fg)
+                        .bg(theme.highlight_bg)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(text, Style::default().fg(theme.dim)))
+            };
+            lines.push(line);
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "e toggle enabled • n toggle notify • d delete • s save",
+        Style::default().fg(theme.dim),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!(
+            "Up/Down select • Esc close  {}-{} / {}",
+            if total_items == 0 { 0 } else { start + 1 },
+            end,
+            total_items
+        ),
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("WATCHLIST");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn legend_items() -> Vec<&'static str> {
+    vec![
+        "Columns:",
+        "  FLIGHT   Callsign (may be blank)",
+        "  REG      Registration",
+        "  TYPE     Aircraft type",
+        "  ROUTE    Route (if available)",
+        "  ALT      Baro altitude (trend arrows)",
+        "  GS       Ground speed (kt)",
+        "  TRK      Track/heading (deg + arrow)",
+        "  LAT/LON  Position",
+        "  DIST     Distance from site (nm)",
+        "  BRG      Bearing from site (deg)",
+        "  SEEN     Seconds since last seen",
+        "  MSGS     Per‑aircraft message count",
+        "  HEX      ICAO hex",
+        "  W        Watchlist match",
+        "Alerts:",
+        "  STALE    Seen > stale_secs",
+        "  NOPOS    Missing position",
+        "  ALERT    Emergency flag",
+        "  SPI      Special Position ID",
+        "  LOWNIC   NIC below threshold",
+        "  LOWNAC   NACp below threshold",
+        "  FAV      Favorited aircraft",
+        "  NEAR     Within notify_radius_mi",
+        "  RERR     Route lookup error (recent)",
+        "Stats:",
+        "  MSG RATE Receiver msg/s (smoothed)",
+        "  EST KBPS Estimated kbps (approx)",
+        "Radar:",
+        "  Canvas   Braille blips with sweep arm",
+        "  * / o    ASCII fallback current/trail",
+        "  F / f    ASCII favorite current/trail",
+        "  X        Selected target (radar view)",
+    ]
+}
+
+pub fn legend_len() -> usize {
+    legend_items().len()
 }
 
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
@@ -889,7 +1379,11 @@ fn fmt_u64(value: Option<u64>, width: usize) -> String {
 fn fmt_f64(value: Option<f64>, width: usize, precision: usize) -> String {
     match value {
         Some(v) if width > 0 => {
-            format!("{v:>width$.precision$}", width = width, precision = precision)
+            format!(
+                "{v:>width$.precision$}",
+                width = width,
+                precision = precision
+            )
         }
         Some(v) => format!("{v:.precision$}", precision = precision),
         None if width > 0 => format!("{:>width$}", "--", width = width),
@@ -897,12 +1391,12 @@ fn fmt_f64(value: Option<f64>, width: usize, precision: usize) -> String {
     }
 }
 
-fn fmt_i64_trend(value: Option<i64>, trend: TrendDir, width: usize) -> String {
+fn fmt_i64_trend(value: Option<i64>, trend: TrendDir, show_trend: bool, width: usize) -> String {
     let base = match value {
         Some(v) => v.to_string(),
         None => "--".to_string(),
     };
-    let arrow = trend_char(trend);
+    let arrow = if show_trend { trend_char(trend) } else { ' ' };
     let text = format!("{base}{arrow}");
     if width > 0 {
         format!("{text:>width$}", width = width)
@@ -927,9 +1421,9 @@ fn fmt_f64_trend(value: Option<f64>, trend: TrendDir, width: usize, precision: u
 
 fn trend_char(trend: TrendDir) -> char {
     match trend {
-        TrendDir::Up => '^',
-        TrendDir::Down => 'v',
-        TrendDir::Flat => '-',
+        TrendDir::Up => '↑',
+        TrendDir::Down => '↓',
+        TrendDir::Flat => '→',
         TrendDir::Unknown => ' ',
     }
 }
@@ -960,6 +1454,41 @@ fn fmt_bearing(site: Option<SiteLocation>, ac: &crate::model::Aircraft, width: u
     }
 }
 
+fn format_track_cell(track: Option<f64>, arrows: bool) -> String {
+    format_track(track, false, arrows)
+}
+
+fn format_track_display(track: Option<f64>, arrows: bool) -> String {
+    format_track(track, true, arrows)
+}
+
+fn format_track(track: Option<f64>, with_degree: bool, arrows: bool) -> String {
+    let Some(track) = track else {
+        return "--".to_string();
+    };
+    let deg = track.rem_euclid(360.0);
+    let arrow = if arrows { track_arrow(deg) } else { "" };
+    if with_degree {
+        format!("{deg:03.0}°{arrow}")
+    } else {
+        format!("{deg:03.0}{arrow}")
+    }
+}
+
+fn track_arrow(deg: f64) -> &'static str {
+    let idx = ((deg + 22.5) / 45.0).floor() as i32 % 8;
+    match idx {
+        0 => "↑",
+        1 => "↗",
+        2 => "→",
+        3 => "↘",
+        4 => "↓",
+        5 => "↙",
+        6 => "←",
+        _ => "↖",
+    }
+}
+
 fn route_display(route: &crate::app::RouteInfo) -> String {
     match (&route.origin, &route.destination) {
         (Some(o), Some(d)) => format!("{o}-{d}"),
@@ -973,8 +1502,7 @@ fn distance_nm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let dlon = (lon2 - lon1).to_radians();
     let lat1 = lat1.to_radians();
     let lat2 = lat2.to_radians();
-    let a = (dlat / 2.0).sin().powi(2)
-        + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     r_nm * c
 }
@@ -996,8 +1524,8 @@ fn truncate_to_width(mut value: String, width: usize) -> String {
     if width == 0 {
         return value;
     }
-    if value.len() > width {
-        value.truncate(width);
+    if text_len(&value) > width {
+        value = value.chars().take(width).collect();
     }
     value
 }
@@ -1006,7 +1534,7 @@ fn center_text(value: &str, width: usize) -> String {
     if width == 0 {
         return value.to_string();
     }
-    let len = value.len();
+    let len = text_len(value);
     if len >= width {
         return value.to_string();
     }
@@ -1023,12 +1551,16 @@ fn center_text(value: &str, width: usize) -> String {
     out
 }
 
-fn select_columns_for_width<'a>(
-    columns: &'a [crate::app::ColumnConfig],
+fn text_len(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn select_columns_for_width(
+    columns: &[crate::app::ColumnConfig],
     available_width: u16,
-) -> Vec<&'a crate::app::ColumnConfig> {
-    let mut cols: Vec<&crate::app::ColumnConfig> =
-        columns.iter().filter(|col| col.visible).collect();
+) -> Vec<crate::app::ColumnConfig> {
+    let mut cols: Vec<crate::app::ColumnConfig> =
+        columns.iter().filter(|col| col.visible).cloned().collect();
     if cols.is_empty() {
         return cols;
     }
@@ -1048,7 +1580,9 @@ fn select_columns_for_width<'a>(
         ColumnId::Alt,
         ColumnId::Type,
         ColumnId::Flight,
+        ColumnId::Watch,
         ColumnId::Fav,
+        ColumnId::Flag,
     ];
 
     for id in drop_order {
@@ -1064,15 +1598,56 @@ fn select_columns_for_width<'a>(
     cols
 }
 
-fn columns_min_width(columns: &[&crate::app::ColumnConfig]) -> u16 {
+fn columns_min_width(columns: &[crate::app::ColumnConfig]) -> u16 {
     let spacing = columns.len().saturating_sub(1) as u16;
     let sum: u16 = columns.iter().map(|c| c.width).sum();
     sum.saturating_add(spacing)
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn phase_ms(period_ms: u64) -> bool {
+    if period_ms == 0 {
+        return true;
+    }
+    (now_ms() / period_ms) % 2 == 0
+}
+
+fn phase_index(period_ms: u64, frames: usize) -> usize {
+    if frames == 0 || period_ms == 0 {
+        return 0;
+    }
+    ((now_ms() / period_ms) as usize) % frames
+}
+
+fn route_pending_for(
+    app: &App,
+    ac: &crate::model::Aircraft,
+    route: Option<&crate::app::RouteInfo>,
+) -> bool {
+    if !app.route_enabled() || route.is_some() {
+        return false;
+    }
+    let callsign = ac.flight.as_deref().map(str::trim).unwrap_or("");
+    if callsign.is_empty() {
+        return false;
+    }
+    app.route_pending(callsign, SystemTime::now())
+}
+
+fn route_pending_text() -> &'static str {
+    const FRAMES: [&str; 4] = [".", "..", "...", ".."];
+    FRAMES[phase_index(350, FRAMES.len())]
+}
+
 fn compute_column_widths(
     app: &App,
-    columns: &[&crate::app::ColumnConfig],
+    columns: &[crate::app::ColumnConfig],
     indices: &[usize],
     available_width: u16,
 ) -> Vec<u16> {
@@ -1086,13 +1661,10 @@ fn compute_column_widths(
         return vec![1; columns.len()];
     }
 
-    let mut desired: Vec<usize> = columns
-        .iter()
-        .map(|col| col.width as usize)
-        .collect();
+    let mut desired: Vec<usize> = columns.iter().map(|col| col.width as usize).collect();
 
     for (i, col) in columns.iter().enumerate() {
-        desired[i] = desired[i].max(col.label.len());
+        desired[i] = desired[i].max(text_len(col.label));
     }
 
     let sample_limit = indices.len().min(50);
@@ -1100,6 +1672,7 @@ fn compute_column_widths(
         let ac = &app.data.aircraft[*idx];
         let trend = app.trend_for(ac);
         let route = app.route_for(ac);
+        let route_pending = route_pending_for(app, ac, route);
         for (i, col) in columns.iter().enumerate() {
             let value = match col.id {
                 ColumnId::Fav => {
@@ -1109,22 +1682,50 @@ fn compute_column_widths(
                         " ".to_string()
                     }
                 }
+                ColumnId::Watch => {
+                    if app.is_watchlisted(ac) {
+                        "W".to_string()
+                    } else {
+                        " ".to_string()
+                    }
+                }
                 ColumnId::Flight => fmt_text(ac.flight.as_deref()),
                 ColumnId::Reg => fmt_text(ac.r.as_deref()),
                 ColumnId::Type => fmt_text(ac.t.as_deref()),
-                ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
-                ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, 0),
+                ColumnId::Route => {
+                    if route_pending {
+                        "...".to_string()
+                    } else {
+                        route.map(route_display).unwrap_or_else(|| "--".to_string())
+                    }
+                }
+                ColumnId::Alt => {
+                    fmt_i64_trend(ac.alt_baro, trend.alt, app.altitude_trend_arrows, 0)
+                }
                 ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
-                ColumnId::Trk => fmt_f64(ac.track, 0, 0),
-                ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
-                ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
+                ColumnId::Trk => format_track_cell(ac.track, app.track_arrows),
+                ColumnId::Lat => {
+                    if app.demo_mode {
+                        "--".to_string()
+                    } else {
+                        fmt_f64(ac.lat, 0, 2)
+                    }
+                }
+                ColumnId::Lon => {
+                    if app.demo_mode {
+                        "--".to_string()
+                    } else {
+                        fmt_f64(ac.lon, 0, 2)
+                    }
+                }
                 ColumnId::Dist => fmt_distance(app.site(), ac, 0),
                 ColumnId::Brg => fmt_bearing(app.site(), ac, 0),
                 ColumnId::Seen => fmt_f64(seen_seconds(ac), 0, 0),
                 ColumnId::Msgs => fmt_u64(ac.messages, 0),
                 ColumnId::Hex => fmt_text(ac.hex.as_deref()),
+                ColumnId::Flag => get_flag(ac.r.as_deref(), app.flag_style),
             };
-            desired[i] = desired[i].max(value.len());
+            desired[i] = desired[i].max(text_len(&value));
         }
     }
 
@@ -1192,16 +1793,23 @@ fn bearing_deg(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     brg
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cell_for_column(
     id: ColumnId,
     width: usize,
     ac: &crate::model::Aircraft,
     favorite: bool,
+    watchlisted: bool,
     seen: Option<f64>,
     trend: crate::app::Trend,
     route: Option<&crate::app::RouteInfo>,
+    route_pending: bool,
     theme: &Theme,
     site: Option<SiteLocation>,
+    altitude_trend_arrows: bool,
+    track_arrows: bool,
+    flag_style: FlagStyle,
+    demo_mode: bool,
 ) -> Cell<'static> {
     let mut text = match id {
         ColumnId::Fav => {
@@ -1211,20 +1819,46 @@ fn cell_for_column(
                 " ".to_string()
             }
         }
+        ColumnId::Watch => {
+            if watchlisted {
+                "W".to_string()
+            } else {
+                " ".to_string()
+            }
+        }
         ColumnId::Flight => fmt_text(ac.flight.as_deref()),
         ColumnId::Reg => fmt_text(ac.r.as_deref()),
         ColumnId::Type => fmt_text(ac.t.as_deref()),
-        ColumnId::Route => route.map(route_display).unwrap_or_else(|| "--".to_string()),
-        ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, 0),
+        ColumnId::Route => {
+            if route_pending {
+                route_pending_text().to_string()
+            } else {
+                route.map(route_display).unwrap_or_else(|| "--".to_string())
+            }
+        }
+        ColumnId::Alt => fmt_i64_trend(ac.alt_baro, trend.alt, altitude_trend_arrows, 0),
         ColumnId::Gs => fmt_f64_trend(ac.gs, trend.gs, 0, 0),
-        ColumnId::Trk => fmt_f64(ac.track, 0, 0),
-        ColumnId::Lat => fmt_f64(ac.lat, 0, 2),
-        ColumnId::Lon => fmt_f64(ac.lon, 0, 2),
+        ColumnId::Trk => format_track_cell(ac.track, track_arrows),
+        ColumnId::Lat => {
+            if demo_mode {
+                "--".to_string()
+            } else {
+                fmt_f64(ac.lat, 0, 2)
+            }
+        }
+        ColumnId::Lon => {
+            if demo_mode {
+                "--".to_string()
+            } else {
+                fmt_f64(ac.lon, 0, 2)
+            }
+        }
         ColumnId::Dist => fmt_distance(site, ac, 0),
         ColumnId::Brg => fmt_bearing(site, ac, 0),
         ColumnId::Seen => fmt_f64(seen, 0, 0),
         ColumnId::Msgs => fmt_u64(ac.messages, 0),
         ColumnId::Hex => fmt_text(ac.hex.as_deref()),
+        ColumnId::Flag => get_flag(ac.r.as_deref(), flag_style),
     };
 
     text = truncate_to_width(text, width);
@@ -1232,6 +1866,8 @@ fn cell_for_column(
 
     if id == ColumnId::Fav && favorite {
         Cell::from(text).style(Style::default().fg(theme.fav).add_modifier(Modifier::BOLD))
+    } else if id == ColumnId::Watch && watchlisted {
+        Cell::from(text).style(Style::default().fg(theme.watch).add_modifier(Modifier::BOLD))
     } else {
         Cell::from(text)
     }
@@ -1260,16 +1896,6 @@ fn format_duration(duration: Duration) -> String {
     format!("{hours:02}:{minutes:02}:{seconds:02}")
 }
 
-fn set_grid(grid: &mut Vec<Vec<(char, u8)>>, x: usize, y: usize, ch: char, prio: u8) {
-    if let Some(row) = grid.get_mut(y) {
-        if let Some(cell) = row.get_mut(x) {
-            if prio >= cell.1 {
-                *cell = (ch, prio);
-            }
-        }
-    }
-}
-
 fn short_source(url: &str) -> String {
     let mut text = url.trim().to_string();
     if let Some(pos) = text.find("://") {
@@ -1289,18 +1915,20 @@ fn short_source(url: &str) -> String {
 }
 
 fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
+    if text_len(value) <= max {
         value.to_string()
     } else if max <= 3 {
-        value[..max].to_string()
+        value.chars().take(max).collect()
     } else {
-        format!("{}...", &value[..(max - 3)])
+        let head: String = value.chars().take(max - 3).collect();
+        format!("{head}...")
     }
 }
 
 fn column_name(id: ColumnId) -> &'static str {
     match id {
         ColumnId::Fav => "FAVORITE",
+        ColumnId::Watch => "WATCHLIST",
         ColumnId::Flight => "FLIGHT",
         ColumnId::Reg => "REG",
         ColumnId::Type => "TYPE",
@@ -1315,6 +1943,193 @@ fn column_name(id: ColumnId) -> &'static str {
         ColumnId::Seen => "SEEN",
         ColumnId::Msgs => "MESSAGES",
         ColumnId::Hex => "HEX",
+        ColumnId::Flag => "FLAG",
+    }
+}
+
+fn get_flag(registration: Option<&str>, style: FlagStyle) -> String {
+    match style {
+        FlagStyle::None => String::new(),
+        FlagStyle::Emoji => flag_emoji(registration).to_string(),
+        FlagStyle::Text => flag_text(registration),
+    }
+}
+
+fn flag_text(registration: Option<&str>) -> String {
+    let emoji = flag_emoji(registration);
+    emoji_to_code(emoji).unwrap_or_else(|| "--".to_string())
+}
+
+fn emoji_to_code(emoji: &str) -> Option<String> {
+    let mut chars = emoji.chars();
+    let first = chars.next()?;
+    let second = chars.next()?;
+    if chars.next().is_some() {
+        return None;
+    }
+    let base = 0x1F1E6;
+    let first = first as u32;
+    let second = second as u32;
+    if !(base..=base + 25).contains(&first) || !(base..=base + 25).contains(&second) {
+        return None;
+    }
+    let a = char::from_u32((first - base) + ('A' as u32))?;
+    let b = char::from_u32((second - base) + ('A' as u32))?;
+    Some(format!("{a}{b}"))
+}
+
+fn flag_emoji(registration: Option<&str>) -> &'static str {
+    if let Some(reg) = registration {
+        if reg.is_empty() {
+            return "🏳️";
+        }
+        let two_char = if reg.len() >= 2 { &reg[0..2] } else { "" };
+        let one_char = &reg[0..1];
+
+        match two_char {
+            // Two-letter prefixes (letter-based)
+            "PH" => "🇳🇱",
+            "SP" => "🇵🇱",
+            "SU" => "🇪🇬",
+            "SX" => "🇬🇷",
+            "TF" => "🇮🇸",
+            "TG" => "🇬🇹",
+            "TI" => "🇨🇷",
+            "YR" => "🇷🇴",
+            "YU" => "🇷🇸",
+            "YV" => "🇻🇪",
+            "ZA" => "🇦🇱",
+            "ZB" => "🇬🇮",
+            "ZS" => "🇿🇦",
+            "ZP" => "🇵🇾",
+            "ZM" => "🇲🇳",
+            "YA" => "🇦🇫",
+            "YB" => "🇮🇩",
+            "YI" => "🇮🇶",
+            "YL" => "🇱🇻",
+            "YN" => "🇳🇮",
+            "YS" => "🇸🇻",
+            "VT" => "🇮🇳",
+            "VN" => "🇻🇳",
+            "VR" => "🇸🇨",
+            "CU" => "🇨🇺",
+            "TX" => "🇧🇲",
+            "ZF" => "🇰🇾",
+            "ZI" => "🇰🇵",
+            "4K" => "🇦🇿",
+            "4L" => "🇬🇪",
+            "5A" => "🇱🇾",
+            "5B" => "🇨🇾",
+            "5R" => "🇲🇬",
+            "5T" => "🇲🇷",
+            "5U" => "🇳🇪",
+            "5V" => "🇹🇬",
+            "5W" => "🇼🇸",
+            "5X" => "🇺🇬",
+            "5Y" => "🇰🇪",
+            "5Z" => "🇹🇿",
+            "6O" => "🇸🇴",
+            "6V" => "🇸🇳",
+            "6Y" => "🇯🇲",
+            "7O" => "🇾🇪",
+            "7P" => "🇱🇸",
+            "7Q" => "🇲🇼",
+            "7R" => "🇩🇿",
+            "8P" => "🇧🇧",
+            "8Q" => "🇲🇻",
+            "8R" => "🇬🇾",
+            "9A" => "🇭🇷",
+            "9G" => "🇬🇭",
+            "9J" => "🇿🇲",
+            "9K" => "🇰🇼",
+            "9L" => "🇸🇱",
+            "9M" => "🇲🇾",
+            "9N" => "🇳🇵",
+            "9Q" => "🇨🇩",
+            "9S" => "🇸🇹",
+            "9U" => "🇧🇮",
+            "9V" => "🇸🇬",
+            "9X" => "🇷🇼",
+            "9Y" => "🇹🇹",
+            "HB" => "🇨🇭",
+            "4X" => "🇮🇱",
+            "A6" => "🇦🇪",
+            "AP" => "🇵🇰",
+            "C5" => "🇬🇲",
+            "CR" => "🇵🇹",
+            "D2" => "🇦🇴",
+            "E3" => "🇪🇷",
+            "E4" => "🇧🇭",
+            "EC" => "🇪🇸",
+            "EI" => "🇮🇪",
+            "EP" => "🇮🇷",
+            "ET" => "🇪🇹",
+            "HA" => "🇭🇺",
+            "HL" => "🇰🇷",
+            "HS" => "🇹🇭",
+            "JA" => "🇯🇵",
+            "JY" => "🇯🇴",
+            "LN" => "🇳🇴",
+            "LZ" => "🇧🇬",
+            "LY" => "🇱🇹",
+            "OD" => "🇱🇧",
+            "OE" => "🇦🇹",
+            "OH" => "🇫🇮",
+            "OK" => "🇨🇿",
+            "OO" => "🇧🇪",
+            "OY" => "🇩🇰",
+            "P4" => "🇦🇼",
+            "PK" => "🇵🇰",
+            "S5" => "🇸🇮",
+            "S9" => "🇸🇦",
+            "ST" => "🇸🇩",
+            "T7" => "🇸🇲",
+            "T9" => "🇧🇴",
+            "UR" => "🇺🇦",
+            "V2" => "🇦🇬",
+            "V3" => "🇧🇿",
+            "V5" => "🇳🇦",
+            "V6" => "🇲🇭",
+            "V7" => "🇫🇯",
+            "XA" => "🇲🇽",
+            "XT" => "🇧🇼",
+            "YJ" => "🇻🇺",
+            "YK" => "🇸🇾",
+            "Z3" => "🇲🇰",
+            "Z8" => "🇸🇸",
+            // Fallback to single-letter prefixes
+            _ => match one_char {
+                "A" => "🇦🇺",
+                "B" => "🇧🇪",
+                "C" => "🇨🇦",
+                "D" => "🇩🇪",
+                "E" => "🇪🇸",
+                "F" => "🇫🇷",
+                "G" => "🇬🇧",
+                "H" => "🇭🇺",
+                "I" => "🇮🇹",
+                "J" => "🇯🇵",
+                "K" => "🇰🇷",
+                "L" => "🇱🇺",
+                "M" => "🇲🇽",
+                "N" => "🇺🇸",
+                "O" => "🇦🇹",
+                "P" => "🇧🇷",
+                "Q" => "🇶🇦",
+                "R" => "🇷🇺",
+                "S" => "🇸🇪",
+                "T" => "🇹🇷",
+                "U" => "🇺🇦",
+                "V" => "🇻🇳",
+                "W" => "🇹🇼",
+                "X" => "🇨🇳",
+                "Y" => "🇳🇴",
+                "Z" => "🇳🇿",
+                _ => "🏳️",
+            }
+        }
+    } else {
+        "🏳️"
     }
 }
 
@@ -1328,6 +2143,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(200, 200, 200),
             fav: Color::Yellow,
+            watch: Color::LightBlue,
             row_even_bg: Color::Rgb(20, 20, 24),
             row_odd_bg: Color::Rgb(12, 12, 16),
             header_bg: Color::Rgb(24, 24, 28),
@@ -1341,6 +2157,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::LightCyan,
             fav: Color::LightCyan,
+            watch: Color::Yellow,
             row_even_bg: Color::Rgb(16, 22, 26),
             row_odd_bg: Color::Rgb(10, 16, 20),
             header_bg: Color::Rgb(20, 26, 30),
@@ -1354,6 +2171,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(255, 220, 120),
             fav: Color::Rgb(255, 191, 0),
+            watch: Color::LightBlue,
             row_even_bg: Color::Rgb(28, 22, 12),
             row_odd_bg: Color::Rgb(20, 16, 10),
             header_bg: Color::Rgb(32, 24, 14),
@@ -1367,6 +2185,7 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Rgb(0, 200, 220),
             fav: Color::Rgb(0, 200, 220),
+            watch: Color::LightYellow,
             row_even_bg: Color::Rgb(10, 20, 26),
             row_odd_bg: Color::Rgb(8, 16, 22),
             header_bg: Color::Rgb(12, 24, 30),
@@ -1380,10 +2199,96 @@ fn theme(mode: ThemeMode) -> Theme {
             highlight_fg: Color::Black,
             highlight_bg: Color::Green,
             fav: Color::Green,
+            watch: Color::LightCyan,
             row_even_bg: Color::Rgb(0, 18, 0),
             row_odd_bg: Color::Rgb(0, 12, 0),
             header_bg: Color::Rgb(0, 22, 0),
             panel_bg: Color::Rgb(0, 16, 0),
         },
+        ThemeMode::Monochrome => Theme {
+            accent: Color::White,
+            warn: Color::White,
+            danger: Color::White,
+            dim: Color::Gray,
+            highlight_fg: Color::Black,
+            highlight_bg: Color::White,
+            fav: Color::White,
+            watch: Color::White,
+            row_even_bg: Color::Rgb(10, 10, 10),
+            row_odd_bg: Color::Rgb(4, 4, 4),
+            header_bg: Color::Rgb(20, 20, 20),
+            panel_bg: Color::Rgb(8, 8, 8),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        center_text, fmt_f64_trend, fmt_i64_trend, fmt_text, format_track_cell,
+        format_track_display, get_flag, text_len, truncate_to_width, TrendDir,
+    };
+    use crate::app::FlagStyle;
+
+    #[test]
+    fn test_get_flag() {
+        // Test single-letter prefixes
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::Emoji), "🇺🇸"); // USA
+        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Emoji), "🇬🇧");  // UK
+        assert_eq!(get_flag(Some("PH123"), FlagStyle::Emoji), "🇳🇱");  // Netherlands (two-letter)
+        assert_eq!(get_flag(Some(""), FlagStyle::Emoji), "🏳️");       // Empty
+        assert_eq!(get_flag(None, FlagStyle::Emoji), "🏳️");           // None
+        assert_eq!(get_flag(Some("9K123"), FlagStyle::Emoji), "🇰🇼"); // Kuwait (two-letter starting with digit)
+
+        // Test more country codes
+        assert_eq!(get_flag(Some("DABCD"), FlagStyle::Emoji), "🇩🇪");  // Germany
+        assert_eq!(get_flag(Some("FABCD"), FlagStyle::Emoji), "🇫🇷");  // France
+        assert_eq!(get_flag(Some("JABCD"), FlagStyle::Emoji), "🇯🇵");  // Japan
+        assert_eq!(get_flag(Some("C1234"), FlagStyle::Emoji), "🇨🇦");  // Canada
+        assert_eq!(get_flag(Some("LY123"), FlagStyle::Emoji), "🇱🇹");  // Lithuania (two-letter)
+        assert_eq!(get_flag(Some("ZS123"), FlagStyle::Emoji), "🇿🇦");  // South Africa (two-letter)
+    }
+
+    #[test]
+    fn test_get_flag_edge_cases() {
+        // Test various edge cases
+        assert_eq!(get_flag(Some("A"), FlagStyle::Emoji), "🇦🇺");      // Single character
+        assert_eq!(get_flag(Some("1"), FlagStyle::Emoji), "🏳️");      // Invalid single digit
+        assert_eq!(get_flag(Some("123"), FlagStyle::Emoji), "🏳️");    // All digits
+        assert_eq!(get_flag(Some("X9Y"), FlagStyle::Emoji), "🇨🇳");    // Single letter fallback
+    }
+
+    #[test]
+    fn test_get_flag_text_and_none() {
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::Text), "US");
+        assert_eq!(get_flag(Some("GABCD"), FlagStyle::Text), "GB");
+        assert_eq!(get_flag(Some("1"), FlagStyle::Text), "--");
+        assert_eq!(get_flag(Some("N12345"), FlagStyle::None), "");
+    }
+
+    #[test]
+    fn test_text_helpers() {
+        assert_eq!(fmt_text(None), "--");
+        assert_eq!(fmt_text(Some("   ")), "--");
+        assert_eq!(fmt_text(Some("AB")), "AB");
+        assert_eq!(truncate_to_width("ABCDE".to_string(), 3), "ABC");
+        assert_eq!(truncate_to_width("ABCDE".to_string(), 0), "ABCDE");
+        assert_eq!(center_text("A", 3), " A ");
+        assert_eq!(center_text("AB", 2), "AB");
+        assert_eq!(text_len("ABC"), 3);
+    }
+
+    #[test]
+    fn test_track_formatting() {
+        assert_eq!(format_track_display(Some(370.0), false), "010°");
+        assert_eq!(format_track_cell(Some(90.0), true), "090→");
+        assert_eq!(format_track_display(None, true), "--");
+    }
+
+    #[test]
+    fn test_trend_formatting() {
+        assert_eq!(fmt_i64_trend(Some(100), TrendDir::Up, true, 0), "100↑");
+        assert_eq!(fmt_i64_trend(None, TrendDir::Unknown, true, 0), "-- ");
+        assert_eq!(fmt_f64_trend(Some(1.5), TrendDir::Down, 0, 1), "1.5↓");
     }
 }
