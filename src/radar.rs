@@ -374,7 +374,7 @@ fn render_canvas(
                 }
             }
             if !data.labels.is_empty() {
-                let label_offset = (range * 0.02).max(0.6).min(5.0);
+                let label_offset = (range * 0.02).clamp(0.6, 5.0);
                 let mut selected_labels = Vec::new();
                 let mut fav_labels = Vec::new();
                 let mut other_labels = Vec::new();
@@ -425,7 +425,7 @@ fn render_canvas(
             }
             if let Some(selection) = &data.selection {
                 if let Some((x, y)) = selection.position {
-                    let marker = (range * 0.02).max(0.5).min(6.0);
+                    let marker = (range * 0.02).clamp(0.5, 6.0);
                     ctx.draw(&Circle {
                         x,
                         y,
@@ -576,7 +576,7 @@ fn label_capacity(area: Rect) -> usize {
     let height = area.height.saturating_sub(2) as usize;
     let by_width = (width / 10).max(2);
     let by_height = (height / 3).max(2);
-    by_width.min(by_height).min(12).max(2)
+    by_width.min(by_height).clamp(2, 12)
 }
 
 fn append_unique_labels<'a>(target: &mut Vec<&'a RadarLabel>, source: &[&'a RadarLabel]) {
@@ -698,13 +698,10 @@ fn selected_aircraft(
     center_lon: f64,
     range_nm: f64,
 ) -> Option<RadarSelection> {
-    let selected_idx = app
+    let idx = app
         .table_state
         .selected()
-        .and_then(|row| indices.get(row).copied());
-    let Some(idx) = selected_idx else {
-        return None;
-    };
+        .and_then(|row| indices.get(row).copied())?;
     let ac = &app.data.aircraft[idx];
     let callsign = ac
         .flight
