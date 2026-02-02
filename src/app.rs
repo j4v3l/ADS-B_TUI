@@ -822,10 +822,8 @@ impl App {
     }
 
     pub fn close_config(&mut self) {
-        if self.config_dirty {
-            if !self.save_config() {
-                return;
-            }
+        if self.config_dirty && !self.save_config() {
+            return;
         }
         self.input_mode = InputMode::Normal;
         self.config_editing = false;
