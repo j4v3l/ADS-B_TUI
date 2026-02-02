@@ -2,8 +2,6 @@
 name: Question / Help
 description: Ask a question or request help
 title: "[QUESTION] "
-labels: ["question", "help wanted"]
-assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
