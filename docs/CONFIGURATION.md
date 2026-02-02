@@ -18,11 +18,14 @@ Create a file named `adsb-tui.toml` with your settings:
 # ADS-B data source URL (required)
 url = "http://your-adsb-receiver:8080/data/aircraft.json"
 
-# Refresh interval in seconds (0 = fetch once)
+# Refresh interval in seconds (0 = fast refresh, clamped to 200ms)
 refresh_secs = 1
 
 # Allow insecure HTTPS connections
 insecure = false
+
+# Allow http:// URLs (explicit override)
+allow_http = true
 ```
 
 ## Complete Configuration Reference
@@ -32,10 +35,14 @@ insecure = false
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `url` | string | *required* | URL of your ADS-B data source |
-| `refresh_secs` | number | 0 | How often to fetch new data (0 = fetch once) |
+| `refresh_secs` | number | 2 | How often to fetch new data (0 = fast refresh, clamped to 200ms) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
+| `allow_http` | boolean | false | Allow http:// URLs |
+| `allow_insecure` | boolean | false | Allow --insecure |
 | `stale_secs` | number | 60 | Mark aircraft as stale after this many seconds |
 | `hide_stale` | boolean | false | Hide stale aircraft from the table |
+
+**API keys:** Use environment variables `ADSB_API_KEY` and `ADSB_API_KEY_HEADER` (recommended). The in-app config editor does not persist `api_key` to disk.
 
 ### Data Quality Settings
 
@@ -123,6 +130,7 @@ insecure = false
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 2
+allow_http = true
 flags_enabled = true
 flag_style = "emoji"
 demo_mode = false
@@ -133,12 +141,13 @@ site_alt_m = 10.0
 
 ### ADS-B Exchange Setup
 
+Set your API key in the environment (recommended):
+`ADSB_API_KEY=YOUR_API_KEY ADSB_API_KEY_HEADER=api-auth`
+
 ```toml
 url = "https://adsbexchange.com/api/aircraft/json/"
 refresh_secs = 1
 insecure = false
-api_key = "YOUR_API_KEY"
-api_key_header = "api-auth"
 log_enabled = true
 log_level = "debug"
 log_file = "adsb-tui.log"
@@ -156,6 +165,7 @@ site_alt_m = 25.0
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 0.5
+allow_http = true
 ui_fps = 120
 smooth_mode = true
 column_cache = true
@@ -174,7 +184,7 @@ You can override configuration values using command line arguments:
 
 ```bash
 # Override URL and refresh rate
-adsb-tui --url "http://example.com/data.json" --refresh-secs 5
+adsb-tui --url "http://example.com/data.json" --allow-http --refresh-secs 5
 
 # Enable debug logging to file
 adsb-tui --log --log-level debug --log-file adsb-tui.log

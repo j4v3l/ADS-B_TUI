@@ -1,34 +1,34 @@
 ADS-B TUI Non-Commercial License
 
-Copyright (c) 2024 j4v3l
+Copyright (c) 2026 j4v3l
 
-Permission is hereby granted, free of charge, to any individual person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal in the
-Software without restriction, including without limitation the rights to use, copy,
-modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
-and to permit persons to whom the Software is furnished to do so, subject to the
-following conditions:
+Permission is hereby granted, free of charge, to any individual or organization
+obtaining a copy of this software and associated documentation files (the
+"Software"), to use, copy, modify, and distribute the Software for
+non-commercial purposes only, subject to the following conditions:
 
-1. **Personal Use Only**: This software may only be used for personal, non-commercial
-   purposes. Commercial use, including but not limited to:
-   - Using this software in a commercial product or service
-   - Selling access to or derivatives of this software
-   - Using this software in a business environment
-   - Any monetization of this software or its derivatives
-   is strictly prohibited.
+1. Non-Commercial Use Only. You may not use the Software for any commercial
+   purpose. "Commercial" means use that is primarily intended for or directed
+   toward commercial advantage or monetary compensation. This includes, without
+   limitation:
+   - Using the Software in a product or service that is sold, licensed, or
+     monetized.
+   - Selling access to the Software or to any derivative works.
+   - Using the Software to provide paid services or support.
 
-2. **Attribution Required**: Any use, modification, or distribution of this software
-   must include clear attribution to the original author (j4v3l) and this license.
+2. Attribution Required. Any use, modification, or distribution of the
+   Software must include clear attribution to the original author (j4v3l) and
+   include this license text in the source or accompanying documentation.
 
-3. **No Warranty**: THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
-   OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-   IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+3. No Warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-4. **No Commercial Support**: The author provides this software as-is with no commercial
-   support obligations. For commercial use cases, please contact the author for
-   separate licensing arrangements.
+4. Commercial Licensing. For commercial use cases, please contact the author
+   for separate licensing arrangements.
 
-For commercial licensing inquiries, please contact: j4v3l@protonmail.com
+For commercial licensing inquiries, please contact: j4v3l

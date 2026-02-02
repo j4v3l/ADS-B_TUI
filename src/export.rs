@@ -70,8 +70,23 @@ fn opt_f64(value: Option<f64>, precision: usize) -> String {
 
 fn csv_field(value: Option<&str>) -> String {
     let text = value.unwrap_or("");
-    if text.contains(',') || text.contains('"') {
-        format!("\"{}\"", text.replace('"', "\"\""))
+    let guarded = guard_csv_formula(text);
+    if guarded.contains(',')
+        || guarded.contains('"')
+        || guarded.contains('\n')
+        || guarded.contains('\r')
+    {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
+    }
+}
+
+fn guard_csv_formula(text: &str) -> String {
+    let trimmed = text.trim_start_matches([' ', '\t']);
+    let mut chars = trimmed.chars();
+    if matches!(chars.next(), Some('=' | '+' | '-' | '@')) {
+        format!("'{}", text)
     } else {
         text.to_string()
     }
@@ -102,5 +117,24 @@ fn unique_path(path: &Path) -> PathBuf {
             return candidate;
         }
         i += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::csv_field;
+
+    #[test]
+    fn csv_field_guards_formulas() {
+        assert_eq!(csv_field(Some("=1+1")), "'=1+1");
+        assert_eq!(csv_field(Some("+SUM(A1:A2)")), "'+SUM(A1:A2)");
+        assert_eq!(csv_field(Some("  -42")), "'  -42");
+    }
+
+    #[test]
+    fn csv_field_quotes_special_chars() {
+        assert_eq!(csv_field(Some("a,b")), "\"a,b\"");
+        assert_eq!(csv_field(Some("line\nbreak")), "\"line\nbreak\"");
+        assert_eq!(csv_field(Some("quote\"here")), "\"quote\"\"here\"");
     }
 }

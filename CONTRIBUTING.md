@@ -7,7 +7,7 @@ Thank you for your interest in contributing to ADS-B TUI! This document provides
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/yourusername/adsb-tui.git
+   git clone https://github.com/j4v3l/ADS-B_TUI
    cd adsb-tui
    ```
 3. **Set up the development environment**:
@@ -25,7 +25,7 @@ Thank you for your interest in contributing to ADS-B TUI! This document provides
 ## 🛠️ Development Workflow
 
 ### 1. Choose an Issue
-- Check the [Issues](https://github.com/yourusername/adsb-tui/issues) page
+- Check the [Issues](https://github.com/j4v3l/ADS-B_TUI/issues) page
 - Look for issues labeled `good first issue` or `help wanted`
 - Comment on the issue to indicate you're working on it
 

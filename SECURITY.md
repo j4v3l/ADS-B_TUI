@@ -10,7 +10,7 @@ If you discover a security vulnerability, please report it responsibly:
 
 ### 📧 Private Reporting
 - **Email**: security@j4v3l.dev
-- **GitHub Security Advisories**: [Report privately](https://github.com/j4v3l/adsb-tui/security/advisories/new)
+- **GitHub Security Advisories**: [Report privately](https://github.com/j4v3l/ADS-B_TUI/security/advisories/new)
 
 **Do not create public issues for security vulnerabilities.**
 
@@ -94,4 +94,4 @@ This security policy may be updated as needed. Significant changes will be commu
 
 ---
 
-**Last Updated**: January 31, 2026
+**Last Updated**: February 1, 2026
