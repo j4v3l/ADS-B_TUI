@@ -1174,9 +1174,14 @@ fn render_config_menu(f: &mut Frame, area: Rect, app: &App) {
     } else {
         "w save"
     };
+    let edit_hint = if app.config_editing {
+        "Enter apply • Esc cancel"
+    } else {
+        "Enter edit • Esc close"
+    };
     lines.push(Line::from(Span::styled(
         format!(
-            "Up/Down select • Enter edit/apply • {save_hint} • Esc close  {}-{} / {}",
+            "Up/Down select • {edit_hint} • {save_hint} • {}-{} / {}",
             if total_items == 0 { 0 } else { start + 1 },
             end,
             total_items
