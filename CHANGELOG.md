@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Route backoff logic** and error handling for API rate limiting
 - **Total aircraft rate tracking** with decay logic for improved rate calculations
 - **Enhanced project configuration** and improved justfile commands
+- Pre-commit hook setup for `cargo fmt` and `cargo clippy` to align local checks with CI
+- VS Code workspace configuration for easier contributor onboarding
 - Country flag display for aircraft based on ICAO registration prefixes
 - Comprehensive flag mapping for 80+ countries
 - Configurable flag visibility (`flags_enabled` option)
@@ -25,15 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Moved FLAG column to first position in aircraft table
+- Refined GitHub issue templates (restored directory, default assignee, clearer examples)
 - Improved Cargo.toml with comprehensive metadata
 - Enhanced error handling and code quality
 - Better project organization and documentation
+- Reorganized runtime tests to satisfy lint ordering and reduce noise
 
 ### Fixed
 - Flag display logic to properly handle ICAO prefix variations
 - Various code quality improvements from clippy
+- Resolved remaining clippy lints (app/radar/runtime) including replacing manual parity math in UI timing
 
-## [0.1.0] - 2024-01-XX
+## [0.1.0] - 2026-01-XX
 
 ### Added
 - Initial release of ADS-B TUI

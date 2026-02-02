@@ -1626,7 +1626,7 @@ fn phase_ms(period_ms: u64) -> bool {
     if period_ms == 0 {
         return true;
     }
-    (now_ms() / period_ms) % 2 == 0
+    (now_ms() / period_ms).is_multiple_of(2)
 }
 
 fn phase_index(period_ms: u64, frames: usize) -> usize {
