@@ -2,6 +2,7 @@
 name: Documentation Improvement
 description: Suggest improvements to documentation
 title: "[DOCS] "
+assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
@@ -29,7 +30,7 @@ body:
     attributes:
       label: Current Issue
       description: What's wrong or missing in the current documentation?
-      placeholder: "The section about X is unclear because..."
+      placeholder: "Example: The configuration section lacks a sample adsb-tui.toml"
     validations:
       required: true
 
@@ -38,7 +39,7 @@ body:
     attributes:
       label: Suggested Improvement
       description: How should we improve it?
-      placeholder: "Add a section about... or clarify that..."
+      placeholder: "Example: Add a step-by-step config sample with comments"
     validations:
       required: true
 

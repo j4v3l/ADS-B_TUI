@@ -2,6 +2,7 @@
 name: Security Vulnerability
 description: Report a security vulnerability
 title: "[SECURITY] "
+assignees: ["j4v3l"]
 body:
   - type: markdown
     attributes:
@@ -19,7 +20,7 @@ body:
     attributes:
       label: Vulnerability Summary
       description: Brief description of the security issue (avoid sensitive details in public issues).
-      placeholder: "Buffer overflow in..."
+      placeholder: "Example: Input parsing overflow in route decoder"
     validations:
       required: true
 
@@ -58,14 +59,14 @@ body:
     attributes:
       label: Potential Impact
       description: What could an attacker achieve by exploiting this?
-      placeholder: "An attacker could..."
+      placeholder: "Example: Attacker could crash the TUI by sending malformed JSON"
 
   - type: textarea
     id: reproduction
     attributes:
       label: Reproduction Steps
       description: How can this vulnerability be reproduced? (High-level only, avoid exploit code)
-      placeholder: "1. Send a request with... 2. Observe..."
+      placeholder: "Example: 1) Provide oversized 'route' string 2) App panics while rendering"
 
   - type: input
     id: version
@@ -79,7 +80,7 @@ body:
     attributes:
       label: Suggested Mitigation
       description: How could this be fixed?
-      placeholder: "Input validation should be added to..."
+      placeholder: "Example: Add length checks and reject routes longer than 256 chars"
 
   - type: checkboxes
     id: checklist
