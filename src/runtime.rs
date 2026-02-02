@@ -304,25 +304,6 @@ fn is_draw_due(now: SystemTime, last_draw: Option<SystemTime>, interval: Duratio
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_draw_due;
-    use std::time::{Duration, SystemTime};
-
-    #[test]
-    fn draw_due_when_interval_zero() {
-        assert!(is_draw_due(SystemTime::now(), None, Duration::from_secs(0)));
-    }
-
-    #[test]
-    fn draw_due_when_elapsed() {
-        let now = SystemTime::now();
-        let last = now - Duration::from_secs(2);
-        assert!(is_draw_due(now, Some(last), Duration::from_secs(1)));
-        assert!(!is_draw_due(now, Some(last), Duration::from_secs(5)));
-    }
-}
-
 pub struct RouteChannels {
     pub req_tx: Sender<Vec<RouteRequest>>,
     pub res_rx: Receiver<RouteMessage>,
@@ -348,5 +329,24 @@ fn handle_mouse(app: &mut App, indices: &[usize], mouse: MouseEvent) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_draw_due;
+    use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn draw_due_when_interval_zero() {
+        assert!(is_draw_due(SystemTime::now(), None, Duration::from_secs(0)));
+    }
+
+    #[test]
+    fn draw_due_when_elapsed() {
+        let now = SystemTime::now();
+        let last = now - Duration::from_secs(2);
+        assert!(is_draw_due(now, Some(last), Duration::from_secs(1)));
+        assert!(!is_draw_due(now, Some(last), Duration::from_secs(5)));
     }
 }

@@ -64,7 +64,7 @@ body:
     id: checklist
     attributes:
       label: Checklist
-      description: Before submitting, please check:
+      description: "Before submitting, please check:"
       options:
         - label: I have read the README and documentation
           required: true
