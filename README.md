@@ -2,15 +2,30 @@
 
 A modern, fast, and user-friendly terminal interface for tracking aircraft using ADS-B data. Display real-time flight information in a beautiful table format with country flags, routes, and more.
 
-[![Build Status](https://github.com/j4v3l/adsb-tui/workflows/CI/badge.svg)](https://github.com/j4v3l/adsb-tui/actions)
-[![License](https://img.shields.io/badge/License-ADS--B--TUI--Non--Commercial-blue.svg)](https://github.com/j4v3l/adsb-tui/blob/main/LICENSE)
+[![Build Status](https://github.com/j4v3l/ADS-B_TUI/workflows/CI/badge.svg)](https://github.com/j4v3l/ADS-B_TUI/actions)
+[![License](https://img.shields.io/badge/License-ADS--B--TUI--Non--Commercial-blue.svg)](https://github.com/j4v3l/ADS-B_TUI/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![MSRV](https://img.shields.io/badge/MSRV-1.70-blue.svg)](https://github.com/j4v3l/adsb-tui)
 [![Crates.io](https://img.shields.io/crates/v/adsb-tui.svg)](https://crates.io/crates/adsb-tui)
-[![Downloads](https://img.shields.io/github/downloads/j4v3l/adsb-tui/total.svg)](https://github.com/j4v3l/adsb-tui/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/j4v3l/adsb-tui.svg)](https://github.com/j4v3l/adsb-tui/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/j4v3l/ADS-B_TUI/total.svg)](https://github.com/j4v3l/ADS-B_TUI/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/j4v3l/ADS-B_TUI.svg)](https://github.com/j4v3l/ADS-B_TUI/stargazers)
 
-![adsb-tui screenshot](https://via.placeholder.com/800x400/1a1a1a/ffffff?text=ADS-B+TUI+Screenshot)
+## 🖼️ Screenshots
+
+**Board view (default layout)**
+![Board view](assets/screenshots/board-view.png)
+
+**Radar view**
+![Radar view](assets/screenshots/radar-view.png)
+
+**Aircraft details**
+![Aircraft details](assets/screenshots/aircraft-details.png)
+
+**Config menu**
+![Config menu](assets/screenshots/config-menu.png)
+
+**Help menu**
+![Help menu](assets/screenshots/help-menu.png)
 
 ## ✨ Features
 
@@ -35,13 +50,13 @@ A modern, fast, and user-friendly terminal interface for tracking aircraft using
 
 #### Option 1: Download Pre-built Binary
 
-Download the latest release for your platform from the [Releases](https://github.com/j4v3l/adsb-tui/releases) page.
+Download the latest release for your platform from the [Releases](https://github.com/j4v3l/ADS-B_TUI/releases) page.
 
 #### Option 2: Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/j4v3l/adsb-tui.git
+git clone https://github.com/j4v3l/ADS-B_TUI.git
 cd adsb-tui
 
 # Build in release mode
@@ -80,7 +95,6 @@ hide_stale = false
 log_enabled = true
 log_level = "info"
 log_file = "adsb-tui.log"
-```
 
 # Minimum acceptable NIC (Navigation Integrity Category)
 low_nic = 5
@@ -102,11 +116,15 @@ radar_blip = "block"
 flags_enabled = true
 flag_style = "emoji" # emoji, text, none
 
+# Mask location-derived values for screenshots
+demo_mode = false
+
 # UI refresh rate in FPS
 ui_fps = 60
 
 # Smooth scrolling mode
 smooth_mode = true
+
 ```
 
 ### Configuration Options
@@ -130,6 +148,7 @@ smooth_mode = true
 | `radar_blip` | Blip style ("dot", "block", "plane") | "dot" |
 | `flags_enabled` | Show country flags | true |
 | `flag_style` | Flag style ("emoji", "text", "none") | "emoji" |
+| `demo_mode` | Hide location values (distance/bearing/site alt, aircraft lat/lon, trail coords) | false |
 | `ui_fps` | UI refresh rate | 60 |
 | `smooth_mode` | Enable smooth scrolling | true |
 | `log_enabled` | Enable logging to file | false |
@@ -156,7 +175,7 @@ smooth_mode = true
 | `q` | Quit application |
 | `?` | Show help |
 
-## � Logging
+## 📝 Logging
 
 ADS-B TUI includes comprehensive logging functionality for debugging and monitoring:
 
@@ -193,7 +212,7 @@ Logs include timestamps, log levels, and structured information about:
 - Error conditions and recovery
 - Performance metrics
 
-## �🛠️ Development
+## 🛠️ Development
 
 ### Prerequisites
 
@@ -204,7 +223,7 @@ Logs include timestamps, log levels, and structured information about:
 
 ```bash
 # Clone the repository
-git clone https://github.com/j4v3l/adsb-tui.git
+git clone https://github.com/j4v3l/ADS-B_TUI.git
 cd adsb-tui
 
 # Install development dependencies
@@ -287,7 +306,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 6. Format your code: `cargo fmt`
 7. Submit a pull request
 
-## � Security
+## 🔒 Security
 
 For security-related concerns, please see our [Security Policy](SECURITY.md).
 
@@ -305,9 +324,9 @@ This project is licensed under the ADS-B TUI Non-Commercial License - see the [L
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/j4v3l/adsb-tui/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/j4v3l/adsb-tui/discussions)
-- **Documentation**: [Wiki](https://github.com/j4v3l/adsb-tui/wiki)
+- **Issues**: [GitHub Issues](https://github.com/j4v3l/ADS-B_TUI/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/j4v3l/ADS-B_TUI/discussions)
+- **Documentation**: [Wiki](https://github.com/j4v3l/ADS-B_TUI/wiki)
 
 ---
 
