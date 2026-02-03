@@ -37,7 +37,7 @@ allow_http = true
 | `url` | string | *required* | URL of your ADS-B data source |
 | `refresh_secs` | number | 2 | How often to fetch new data (0 = fast refresh, clamped to 200ms) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
-| `allow_http` | boolean | false | Allow http:// URLs |
+| `allow_http` | boolean | true | Allow http:// URLs |
 | `allow_insecure` | boolean | false | Allow --insecure |
 | `stale_secs` | number | 60 | Mark aircraft as stale after this many seconds |
 | `hide_stale` | boolean | false | Hide stale aircraft from the table |

@@ -15,6 +15,7 @@ pub const DEFAULT_TRAIL_LEN: u64 = 6;
 pub const DEFAULT_FAVORITES_FILE: &str = "adsb-favorites.txt";
 pub const DEFAULT_WATCHLIST_FILE: &str = "adsb-watchlist.toml";
 pub const DEFAULT_WATCHLIST_ENABLED: bool = true;
+pub const DEFAULT_ALLOW_HTTP: bool = true;
 pub const DEFAULT_API_KEY_HEADER: &str = "api-auth";
 pub const DEFAULT_ROUTE_BASE: &str = "https://api.adsb.lol";
 pub const DEFAULT_ROUTE_TTL_SECS: u64 = 3600;
@@ -188,7 +189,7 @@ pub fn parse_args() -> Result<Config> {
         url: DEFAULT_URL.to_string(),
         refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
         insecure: false,
-        allow_http: false,
+        allow_http: DEFAULT_ALLOW_HTTP,
         allow_insecure: false,
         config_path: config_path.clone(),
         stale_secs: DEFAULT_STALE_SECS,
@@ -1071,7 +1072,7 @@ mod tests {
             url: DEFAULT_URL.to_string(),
             refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
             insecure: false,
-            allow_http: false,
+            allow_http: DEFAULT_ALLOW_HTTP,
             allow_insecure: false,
             config_path: PathBuf::from("adsb-tui.toml"),
             stale_secs: DEFAULT_STALE_SECS,
@@ -1125,6 +1126,20 @@ mod tests {
             stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
             stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
         }
+    }
+
+    #[test]
+    fn default_allows_http_url() {
+        let cfg = base_config();
+        assert!(validate_security(&cfg).is_ok());
+    }
+
+    #[test]
+    fn http_url_rejected_when_disabled() {
+        let mut cfg = base_config();
+        cfg.allow_http = false;
+        let err = validate_security(&cfg).unwrap_err();
+        assert!(err.to_string().contains("Refusing insecure http URL"));
     }
 
     #[test]

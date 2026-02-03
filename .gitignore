@@ -16,3 +16,4 @@ adsb-watchlist.toml
 *.bak
 *.tmp
 *.log
+ruleset.json

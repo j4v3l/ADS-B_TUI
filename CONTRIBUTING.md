@@ -6,11 +6,14 @@ Thank you for your interest in contributing to ADS-B TUI! This document provides
 
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
+
    ```bash
    git clone https://github.com/j4v3l/ADS-B_TUI adsb-tui
    cd adsb-tui
    ```
+
 3. **Set up the development environment**:
+
    ```bash
    # Install Rust (if not already installed)
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -25,11 +28,13 @@ Thank you for your interest in contributing to ADS-B TUI! This document provides
 ## 🛠️ Development Workflow
 
 ### 1. Choose an Issue
+
 - Check the [Issues](https://github.com/j4v3l/ADS-B_TUI/issues) page
 - Look for issues labeled `good first issue` or `help wanted`
 - Comment on the issue to indicate you're working on it
 
 ### 2. Create a Branch
+
 ```bash
 # Create and switch to a new branch
 git checkout -b feature/your-feature-name
@@ -38,12 +43,14 @@ git checkout -b fix/issue-number-description
 ```
 
 ### 3. Make Changes
+
 - Write clear, concise commit messages
 - Follow the existing code style
 - Add tests for new functionality
 - Update documentation as needed
 
 ### 4. Test Your Changes
+
 ```bash
 # Run all checks
 just check
@@ -56,6 +63,7 @@ cargo run
 ```
 
 ### 5. Submit a Pull Request
+
 - Push your branch to your fork
 - Create a Pull Request from your branch to the main repository
 - Fill out the PR template with details about your changes
@@ -64,18 +72,21 @@ cargo run
 ## 📝 Code Guidelines
 
 ### Rust Style
+
 - Follow the official [Rust Style Guide](https://doc.rust-lang.org/style-guide/)
 - Use `cargo fmt` to format your code
 - Fix all `cargo clippy` warnings
 - Write idiomatic Rust code
 
 ### Commit Messages
+
 - Use the present tense ("Add feature" not "Added feature")
 - Start with a capital letter
 - Keep the first line under 50 characters
 - Add more detail in the body if needed
 
 Examples:
+
 ```
 Add support for custom column widths
 
@@ -84,6 +95,7 @@ custom widths for each column in the aircraft table.
 ```
 
 ### Testing
+
 - Add unit tests for new functions
 - Add integration tests for new features
 - Ensure all existing tests pass
@@ -116,6 +128,7 @@ adsb-tui/
 ## 🧪 Testing
 
 ### Unit Tests
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -130,7 +143,9 @@ mod tests {
 ```
 
 ### Integration Tests
+
 Create files in the `tests/` directory:
+
 ```rust
 // tests/integration_test.rs
 use adsb_tui::*;
@@ -142,6 +157,7 @@ fn test_full_workflow() {
 ```
 
 ### Manual Testing
+
 - Test with real ADS-B data sources
 - Verify UI responsiveness
 - Check keyboard shortcuts
@@ -150,6 +166,7 @@ fn test_full_workflow() {
 ## 📚 Documentation
 
 ### Code Documentation
+
 - Add doc comments to public functions and structs
 - Use `cargo doc` to generate documentation
 - Include examples in doc comments when helpful
@@ -169,6 +186,7 @@ pub fn calculate_distance(p1: Point, p2: Point) -> f64 {
 ```
 
 ### User Documentation
+
 - Update README.md for new features
 - Add configuration examples
 - Update keyboard shortcuts documentation
@@ -176,6 +194,7 @@ pub fn calculate_distance(p1: Point, p2: Point) -> f64 {
 ## 🔧 Development Tools
 
 ### Just Commands
+
 ```bash
 just build          # Build in debug mode
 just build-release  # Build in release mode
@@ -187,6 +206,7 @@ just run            # Run the application
 ```
 
 ### Useful Cargo Commands
+
 ```bash
 cargo check         # Quick compilation check
 cargo build         # Build project
@@ -199,6 +219,7 @@ cargo update        # Update dependencies
 ## 🚨 Issue Reporting
 
 When reporting bugs, please include:
+
 - **Version**: Output of `adsb-tui --version`
 - **Platform**: OS and architecture
 - **Configuration**: Relevant config file sections
@@ -210,6 +231,7 @@ When reporting bugs, please include:
 ## 💡 Feature Requests
 
 For new features:
+
 - Check if the feature already exists
 - Describe the use case clearly
 - Explain why it's needed
@@ -224,6 +246,7 @@ For new features:
 ## 📋 Pull Request Checklist
 
 Before submitting a PR:
+
 - [ ] Code compiles without warnings
 - [ ] All tests pass
 - [ ] Code is formatted with `cargo fmt`
@@ -235,6 +258,7 @@ Before submitting a PR:
 ## 🎉 Recognition
 
 Contributors will be:
+
 - Listed in the README.md contributors section
 - Mentioned in release notes
 - Credited for their work

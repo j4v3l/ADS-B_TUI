@@ -568,8 +568,12 @@ impl App {
         let now_time = data
             .now
             .and_then(|n| {
-                if n > 0 {
-                    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64))
+                let mut value = n;
+                if value > 4_000_000_000 {
+                    value /= 1000;
+                }
+                if value > 0 {
+                    SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(value as u64))
                 } else {
                     None
                 }
@@ -811,11 +815,12 @@ impl App {
     }
 
     pub fn open_config(&mut self) {
+        let config_exists = self.config_path.exists();
         self.config_items = load_config_items(&self.config_path);
         self.config_cursor = 0;
         self.config_editing = false;
         self.config_edit.clear();
-        self.config_dirty = false;
+        self.config_dirty = !config_exists;
         self.config_status = None;
         self.input_mode = InputMode::Config;
         debug!("open config items={}", self.config_items.len());
@@ -885,6 +890,20 @@ impl App {
     }
 
     pub fn save_config(&mut self) -> bool {
+        if self.config_editing {
+            self.apply_config_edit();
+        }
+        if let Some(parent) = self
+            .config_path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+        {
+            if let Err(err) = fs::create_dir_all(parent) {
+                warn!("config save failed: {err}");
+                self.config_status = Some((format!("save failed: {err}"), SystemTime::now()));
+                return false;
+            }
+        }
         let existing = fs::read_to_string(&self.config_path).unwrap_or_default();
         let mut doc = existing
             .parse::<DocumentMut>()

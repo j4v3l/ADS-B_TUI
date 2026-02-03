@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, dev]
   pull_request:
-    branches: [main, master]
+    branches: [main, dev]
   release:
     types: [published]
 
@@ -23,8 +23,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout code
@@ -34,6 +32,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: rustfmt, clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -44,8 +43,8 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Run tests (all targets)
+        run: cargo test --all-targets --verbose
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
@@ -82,9 +81,6 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             name: macos-arm64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            name: windows-x64
 
     steps:
       - name: Checkout code
@@ -107,19 +103,11 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../adsb-tui-${{ matrix.name }}.tar.gz adsb-tui
 
-      - name: Package binary (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          cd target/${{ matrix.target }}/release
-          7z a ../../../adsb-tui-${{ matrix.name }}.zip adsb-tui.exe
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: adsb-tui-${{ matrix.name }}
-          path: |
-            adsb-tui-${{ matrix.name }}.tar.gz
-            adsb-tui-${{ matrix.name }}.zip
+          path: adsb-tui-${{ matrix.name }}.tar.gz
 
   release:
     name: Create Release
@@ -128,10 +116,21 @@ jobs:
     if: github.event_name == 'release'
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v2
+        with:
+          config: .gitcliff.toml
+          args: --tag ${{ github.event.release.tag_name }} -o release-notes.md
 
       - name: Create release archives
         run: |
@@ -146,5 +145,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/**/*
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

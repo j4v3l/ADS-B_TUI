@@ -78,8 +78,8 @@ fn test_readme_exists_and_complete() {
         "## 🚀 Quick Start",
         "## 📖 Configuration",
         "## 🎮 Controls",
-        "## � Logging",
-        "## �🛠️ Development",
+        "## 📝 Logging",
+        "## 🛠️ Development",
     ];
 
     for section in required_sections {
