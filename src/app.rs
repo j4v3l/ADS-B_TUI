@@ -568,8 +568,12 @@ impl App {
         let now_time = data
             .now
             .and_then(|n| {
-                if n > 0 {
-                    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(n as u64))
+                let mut value = n;
+                if value > 4_000_000_000 {
+                    value /= 1000;
+                }
+                if value > 0 {
+                    SystemTime::UNIX_EPOCH.checked_add(Duration::from_secs(value as u64))
                 } else {
                     None
                 }

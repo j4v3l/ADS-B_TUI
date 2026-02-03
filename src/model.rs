@@ -7,7 +7,7 @@ pub struct ApiResponse {
     pub now: Option<i64>,
     #[serde(default, deserialize_with = "de_opt_u64_from_any")]
     pub messages: Option<u64>,
-    #[serde(default)]
+    #[serde(default, alias = "ac")]
     pub aircraft: Vec<Aircraft>,
 }
 
@@ -31,53 +31,53 @@ pub struct Aircraft {
     pub own_op: Option<String>,
     #[serde(default)]
     pub year: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub alt_baro: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub alt_geom: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub gs: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub track: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub baro_rate: Option<i64>,
     #[serde(default)]
     pub category: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub nav_qnh: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub nav_altitude_mcp: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub lat: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub lon: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub nic: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub rc: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub seen_pos: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub version: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub nic_baro: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub nac_p: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub nac_v: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub sil: Option<i64>,
     #[serde(default)]
     pub sil_type: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub alert: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_i64_from_any")]
     pub spi: Option<i64>,
     #[serde(default, deserialize_with = "de_opt_u64_from_any")]
     pub messages: Option<u64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub seen: Option<f64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_opt_f64_from_any")]
     pub rssi: Option<f64>,
 }
 
@@ -99,6 +99,46 @@ where
                 Ok(Some(value))
             } else if let Some(value) = number.as_f64() {
                 Ok(Some(value as i64))
+            } else {
+                Ok(None)
+            }
+        }
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else if let Ok(value) = trimmed.parse::<i64>() {
+                Ok(Some(value))
+            } else if let Ok(value) = trimmed.parse::<f64>() {
+                Ok(Some(value as i64))
+            } else {
+                Ok(None)
+            }
+        }
+        Value::Null => Ok(None),
+        other => Err(serde::de::Error::custom(format!(
+            "expected number or null, got {other}"
+        ))),
+    }
+}
+
+fn de_opt_f64_from_any<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Value::deserialize(deserializer)? {
+        Value::Number(number) => number
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("expected float-compatible number")),
+        Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else if let Ok(value) = trimmed.parse::<f64>() {
+                Ok(Some(value))
+            } else if let Ok(value) = trimmed.parse::<i64>() {
+                Ok(Some(value as f64))
             } else {
                 Ok(None)
             }

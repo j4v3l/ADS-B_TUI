@@ -23,8 +23,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: x86_64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
 
     steps:
       - name: Checkout code
@@ -34,6 +32,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          components: rustfmt, clippy
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -82,9 +81,6 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             name: macos-arm64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            name: windows-x64
 
     steps:
       - name: Checkout code
@@ -107,19 +103,11 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../adsb-tui-${{ matrix.name }}.tar.gz adsb-tui
 
-      - name: Package binary (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          cd target/${{ matrix.target }}/release
-          7z a ../../../adsb-tui-${{ matrix.name }}.zip adsb-tui.exe
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: adsb-tui-${{ matrix.name }}
-          path: |
-            adsb-tui-${{ matrix.name }}.tar.gz
-            adsb-tui-${{ matrix.name }}.zip
+          path: adsb-tui-${{ matrix.name }}.tar.gz
 
   release:
     name: Create Release
