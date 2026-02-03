@@ -43,8 +43,8 @@ jobs:
       - name: Run clippy
         run: cargo clippy -- -D warnings
 
-      - name: Run tests
-        run: cargo test --verbose
+      - name: Run tests (all targets)
+        run: cargo test --all-targets --verbose
 
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
