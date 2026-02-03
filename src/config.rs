@@ -1139,9 +1139,7 @@ mod tests {
         let mut cfg = base_config();
         cfg.allow_http = false;
         let err = validate_security(&cfg).unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Refusing insecure http URL"));
+        assert!(err.to_string().contains("Refusing insecure http URL"));
     }
 
     #[test]
