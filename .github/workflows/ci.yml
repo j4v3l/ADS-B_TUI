@@ -116,10 +116,21 @@ jobs:
     if: github.event_name == 'release'
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v2
+        with:
+          config: .gitcliff.toml
+          args: --tag ${{ github.event.release.tag_name }} -o release-notes.md
 
       - name: Create release archives
         run: |
@@ -134,5 +145,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: artifacts/**/*
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

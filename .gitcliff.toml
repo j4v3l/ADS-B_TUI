@@ -1,0 +1,26 @@
+[changelog]
+sort = "desc"
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+tag_pattern = "*"
+
+[bump]
+initial_tag = "0.0.0"
+
+[templates]
+commit = "- {{commit.subject}} ({{commit.id.short}})\n"
+
+[sections]
+Features = ["feat"]
+Fixes = ["fix"]
+Documentation = ["docs"]
+Performance = ["perf"]
+Refactoring = ["refactor"]
+Tests = ["test"]
+Build = ["build"]
+CI = ["ci"]
+Chores = ["chore"]
+Reverts = ["revert"]
+Other = ["style", "wip", "misc", "deps", "release", "breaking", "config"]
