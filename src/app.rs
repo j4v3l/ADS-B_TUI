@@ -2335,7 +2335,11 @@ fn default_config_items() -> Vec<ConfigItem> {
         config::DEFAULT_REFRESH_SECS.to_string(),
     );
     push_item("insecure", ConfigKind::Bool, "false".to_string());
-    push_item("allow_http", ConfigKind::Bool, "false".to_string());
+    push_item(
+        "allow_http",
+        ConfigKind::Bool,
+        config::DEFAULT_ALLOW_HTTP.to_string(),
+    );
     push_item("allow_insecure", ConfigKind::Bool, "false".to_string());
     push_item(
         "stale_secs",
