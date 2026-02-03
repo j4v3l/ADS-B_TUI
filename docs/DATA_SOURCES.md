@@ -16,7 +16,7 @@ To receive ADS-B data, you'll need:
 
 ## Popular ADS-B Receivers
 
-Note: If your data source uses `http://`, set `allow_http = true` in `adsb-tui.toml` or export `ADSB_ALLOW_HTTP=1`.
+HTTP sources are allowed by default. Set `allow_http = false` (or omit `allow_http` entirely on HTTPS feeds) if you want to enforce HTTPS-only.
 
 ### 1. RTL-SDR with dump1090
 
