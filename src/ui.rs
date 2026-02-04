@@ -1361,9 +1361,30 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_lookup_menu(f: &mut Frame, area: Rect, app: &App) {
     let theme = theme(app.theme_mode);
-    let popup = centered_rect(70, 14, area);
+    let popup = centered_rect(70, 16, area);
 
     f.render_widget(Clear, popup);
+
+    let label = Style::default().fg(theme.dim).add_modifier(Modifier::BOLD);
+    let supports = "hex | callsign | reg | type | squawk | point <lat lon nm> | mil | ladd | pia";
+
+    let query = format!("{}_", app.lookup_input);
+    let status_text = app.lookup_status.as_deref().unwrap_or("Enter to fetch");
+    let status_text = if app.lookup_busy {
+        let spinner = ["|", "/", "-", "\\"][phase_index(160, 4)];
+        format!("[{spinner}] {status_text}")
+    } else {
+        status_text.to_string()
+    };
+    let status_style = if status_text.starts_with("Error") {
+        Style::default().fg(theme.danger)
+    } else if app.lookup_busy {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.dim)
+    };
 
     let mut lines = Vec::new();
     lines.push(Line::from(Span::styled(
@@ -1372,44 +1393,57 @@ fn render_lookup_menu(f: &mut Frame, area: Rect, app: &App) {
             .fg(theme.accent)
             .add_modifier(Modifier::BOLD),
     )));
-    lines.push(Line::from(Span::styled(
-        "Formats: hex <id>, callsign <cs>, reg <reg>, type <icao>, squawk <code>, point <lat> <lon> <nm>, mil, ladd, pia",
-        Style::default().fg(theme.dim),
-    )));
-
-    let input_line = format!("QUERY  {}_", app.lookup_input);
-    lines.push(Line::from(Span::styled(
-        input_line,
-        Style::default().fg(theme.highlight_fg).bg(theme.header_bg),
-    )));
-
-    if let Some(status) = &app.lookup_status {
-        lines.push(Line::from(Span::styled(
-            status.clone(),
+    lines.push(Line::from(vec![
+        Span::styled("SUPPORTS ", label),
+        Span::styled(supports, Style::default().fg(theme.dim)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("QUERY    ", label),
+        Span::styled(
+            query,
+            Style::default().fg(theme.highlight_fg).bg(theme.header_bg),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("STATUS   ", label),
+        Span::styled(status_text, status_style),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("EXAMPLES ", label),
+        Span::styled(
+            "hex abc123 | reg n123ab | point 37.6 -122.3 50",
             Style::default().fg(theme.dim),
-        )));
-    }
+        ),
+    ]));
 
-    if let Some(results) = &app.lookup_results {
-        if results.is_empty() {
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "RESULTS",
+        Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+    )));
+    match &app.lookup_results {
+        Some(results) if results.is_empty() => {
             lines.push(Line::from(Span::styled(
                 "No results",
                 Style::default().fg(theme.dim),
             )));
-        } else {
-            lines.push(Line::from(""));
+        }
+        Some(results) => {
             lines.push(Line::from(Span::styled(
-                "TOP MATCHES (hex / callsign / type / alt)",
+                "HEX    CALLSIGN  TYPE    ALT",
                 Style::default().fg(theme.dim),
             )));
-            for ac in results.iter().take(5) {
+            for ac in results.iter().take(6) {
                 let hex = ac.hex.as_deref().unwrap_or("--");
                 let cs = fit_str(ac.flight.as_deref(), 8);
                 let t = ac.t.as_deref().unwrap_or("--");
-                let alt = fmt_i64(ac.alt_baro, 0);
-                lines.push(Line::from(format!("{hex:<6}  {cs:<8}  {t:<6}  {alt} ft")));
+                let alt = match ac.alt_baro {
+                    Some(v) => format!("{:>5} ft", v),
+                    None => "--".to_string(),
+                };
+                lines.push(Line::from(format!("{hex:<6}  {cs:<8}  {t:<6}  {alt}")));
             }
-            let extra = results.len().saturating_sub(5);
+            let extra = results.len().saturating_sub(6);
             if extra > 0 {
                 lines.push(Line::from(Span::styled(
                     format!("... and {extra} more"),
@@ -1417,11 +1451,17 @@ fn render_lookup_menu(f: &mut Frame, area: Rect, app: &App) {
                 )));
             }
         }
+        None => {
+            lines.push(Line::from(Span::styled(
+                "Waiting for lookup...",
+                Style::default().fg(theme.dim),
+            )));
+        }
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "Enter to fetch • Esc close • Ctrl+U clear",
+        "Enter fetch | Esc close | Ctrl+U clear",
         Style::default().fg(theme.dim),
     )));
 
