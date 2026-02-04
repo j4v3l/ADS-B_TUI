@@ -80,7 +80,35 @@ fn fetch_routeset(
     base_url: &str,
     batch: &[RouteRequest],
 ) -> Result<Vec<RouteResult>, String> {
-    let url = format!("{}/api/0/routeset", base_url.trim_end_matches('/'));
+    match fetch_routeset_with_base(client, base_url, batch) {
+        Ok(results) => Ok(results),
+        Err(err) => {
+            // If airplanes.live is down or missing routeset, fall back to adsb.lol (shared backend).
+            if base_url.contains("airplanes.live") {
+                let alt = "https://api.adsb.lol";
+                if let Ok(results) = fetch_routeset_with_base(client, alt, batch) {
+                    return Ok(results);
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+fn fetch_routeset_with_base(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    batch: &[RouteRequest],
+) -> Result<Vec<RouteResult>, String> {
+    let base = base_url.trim_end_matches('/');
+    let urls = [
+        format!("{base}/api/0/routeset"),
+        format!("{base}/api/routeset"),
+        format!("{base}/v2/routeset"),
+        format!("{base}/v1/routeset"),
+        format!("{base}/routeset"),
+        base.to_string(),
+    ];
     let callsigns: Vec<String> = batch
         .iter()
         .map(|req| req.callsign.trim().to_ascii_uppercase())
@@ -103,16 +131,164 @@ fn fetch_routeset(
         serde_json::json!({ "callsign": callsigns }),
     ];
 
-    for payload in payloads {
-        match post_payload(client, &url, &payload) {
-            Ok(body) => return Ok(parse_routes(body)),
-            Err(err) => {
-                if is_rate_limited_message(&err) {
-                    return Err(err);
+    for url in urls.iter() {
+        for payload in &payloads {
+            match post_payload(client, url, payload) {
+                Ok(body) => {
+                    let parsed = parse_routes(body);
+                    if !parsed.is_empty() {
+                        return Ok(parsed);
+                    }
+                    // Empty response; try next payload variant before failing.
+                    last_err = last_err.or_else(|| Some("Route response empty".to_string()));
                 }
-                last_err = Some(err)
+                Err(err) => {
+                    if is_rate_limited_message(&err) {
+                        return Err(err);
+                    }
+                    last_err = Some(err)
+                }
             }
         }
+    }
+
+    if let Ok(body) = get_with_callsigns(client, &urls, &callsigns) {
+        let parsed = parse_routes(body);
+        if !parsed.is_empty() {
+            return Ok(parsed);
+        }
+    }
+
+    if let Ok(results) = fetch_route_get_callsigns(client, base_url, &callsigns) {
+        if !results.is_empty() {
+            return Ok(results);
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| "Route request failed".to_string()))
+}
+
+fn get_with_callsigns(
+    client: &reqwest::blocking::Client,
+    urls: &[String],
+    callsigns: &[String],
+) -> Result<Value, String> {
+    if callsigns.is_empty() {
+        return Err("no callsigns".to_string());
+    }
+
+    let joined = callsigns.join(",");
+    let query_params = vec![
+        ("callsigns", joined.clone()),
+        ("callsign", joined.clone()),
+        ("icao", joined.clone()),
+    ];
+
+    let mut last_err: Option<String> = None;
+
+    for url in urls {
+        for (key, val) in &query_params {
+            if val.is_empty() {
+                continue;
+            }
+
+            let mut parsed = match reqwest::Url::parse(url) {
+                Ok(u) => u,
+                Err(err) => {
+                    last_err = Some(err.to_string());
+                    continue;
+                }
+            };
+            parsed.query_pairs_mut().append_pair(key, val);
+
+            match client.get(parsed).send() {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        if status.as_u16() == 429 {
+                            let retry_after =
+                                retry_after_header_seconds(resp.headers()).unwrap_or(60);
+                            return Err(format!(
+                                "Route HTTP 429 Too Many Requests (retry-after={}s)",
+                                retry_after
+                            ));
+                        }
+                        last_err = Some(format!("Route HTTP {}", status));
+                        continue;
+                    }
+                    match resp.json::<Value>() {
+                        Ok(body) => return Ok(body),
+                        Err(err) => {
+                            last_err = Some(err.to_string());
+                            continue;
+                        }
+                    }
+                }
+                Err(err) => {
+                    last_err = Some(err.to_string());
+                    continue;
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| "Route request failed".to_string()))
+}
+
+fn fetch_route_get_callsigns(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    callsigns: &[String],
+) -> Result<Vec<RouteResult>, String> {
+    let base = base_url.trim_end_matches('/');
+    let paths = ["api/0/route", "api/route", "v2/route", "v1/route", "route"];
+    let mut results = Vec::new();
+    let mut last_err = None;
+
+    for cs in callsigns {
+        let clean = cs.trim();
+        if clean.is_empty() {
+            continue;
+        }
+        for path in &paths {
+            let url = format!("{base}/{path}/{}", clean);
+            match client.get(&url).send() {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        if status.as_u16() == 429 {
+                            let retry_after =
+                                retry_after_header_seconds(resp.headers()).unwrap_or(60);
+                            last_err = Some(format!(
+                                "Route HTTP 429 Too Many Requests (retry-after={}s)",
+                                retry_after
+                            ));
+                            continue;
+                        }
+                        last_err = Some(format!("Route HTTP {}", status));
+                        continue;
+                    }
+                    match resp.json::<Value>() {
+                        Ok(body) => {
+                            let mut parsed = parse_routes(body);
+                            if parsed.is_empty() {
+                                continue;
+                            }
+                            results.append(&mut parsed);
+                            break;
+                        }
+                        Err(err) => {
+                            last_err = Some(err.to_string());
+                        }
+                    }
+                }
+                Err(err) => last_err = Some(err.to_string()),
+            }
+        }
+    }
+
+    if !results.is_empty() {
+        return Ok(results);
     }
 
     Err(last_err.unwrap_or_else(|| "Route request failed".to_string()))
@@ -149,10 +325,24 @@ fn post_payload(
         .map_err(|err| err.to_string())?;
     let status = resp.status();
     if !status.is_success() {
+        if status.as_u16() == 429 {
+            let retry_after = retry_after_header_seconds(resp.headers()).unwrap_or(60);
+            return Err(format!(
+                "Route HTTP 429 Too Many Requests (retry-after={}s)",
+                retry_after
+            ));
+        }
         return Err(format!("Route HTTP {}", status));
     }
     let body: Value = resp.json::<Value>().map_err(|err| err.to_string())?;
     Ok(body)
+}
+
+fn retry_after_header_seconds(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
 fn is_rate_limited_message(message: &str) -> bool {

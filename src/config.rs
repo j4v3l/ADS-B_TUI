@@ -17,12 +17,12 @@ pub const DEFAULT_WATCHLIST_FILE: &str = "adsb-watchlist.toml";
 pub const DEFAULT_WATCHLIST_ENABLED: bool = true;
 pub const DEFAULT_ALLOW_HTTP: bool = true;
 pub const DEFAULT_API_KEY_HEADER: &str = "api-auth";
-pub const DEFAULT_ROUTE_BASE: &str = "https://api.adsb.lol";
+pub const DEFAULT_ROUTE_BASE: &str = "https://api.airplanes.live";
 pub const DEFAULT_ROUTE_TTL_SECS: u64 = 3600;
 pub const DEFAULT_ROUTE_REFRESH_SECS: u64 = 15;
 pub const DEFAULT_ROUTE_BATCH: u64 = 20;
 pub const DEFAULT_ROUTE_TIMEOUT_SECS: u64 = 6;
-pub const DEFAULT_ROUTE_MODE: &str = "tar1090";
+pub const DEFAULT_ROUTE_MODE: &str = "routeset";
 pub const DEFAULT_ROUTE_PATH: &str = "tar1090/data/routes.json";
 pub const DEFAULT_UI_FPS: u64 = 10;
 pub const DEFAULT_SMOOTH_MODE: bool = true;
@@ -46,10 +46,13 @@ pub const DEFAULT_RADAR_ASPECT: f64 = 1.0;
 pub const DEFAULT_RADAR_RENDERER: &str = "canvas";
 pub const DEFAULT_RADAR_LABELS: bool = false;
 pub const DEFAULT_RADAR_BLIP: &str = "dot";
+pub const DEFAULT_ROLE_ENABLED: bool = true;
+pub const DEFAULT_ROLE_HIGHLIGHT: bool = true;
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub url: String,
+    pub urls: Vec<String>,
     pub refresh: Duration,
     pub insecure: bool,
     pub allow_http: bool,
@@ -105,11 +108,14 @@ pub struct Config {
     pub stats_metric_1: String,
     pub stats_metric_2: String,
     pub stats_metric_3: String,
+    pub role_enabled: bool,
+    pub role_highlight: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
 struct FileConfig {
     url: Option<String>,
+    urls: Option<Vec<String>>,
     refresh_secs: Option<u64>,
     insecure: Option<bool>,
     allow_http: Option<bool>,
@@ -164,6 +170,8 @@ struct FileConfig {
     stats_metric_1: Option<String>,
     stats_metric_2: Option<String>,
     stats_metric_3: Option<String>,
+    role_enabled: Option<bool>,
+    role_highlight: Option<bool>,
 }
 
 pub fn parse_args() -> Result<Config> {
@@ -187,6 +195,7 @@ pub fn parse_args() -> Result<Config> {
 
     let mut config = Config {
         url: DEFAULT_URL.to_string(),
+        urls: vec![DEFAULT_URL.to_string()],
         refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
         insecure: false,
         allow_http: DEFAULT_ALLOW_HTTP,
@@ -242,6 +251,8 @@ pub fn parse_args() -> Result<Config> {
         stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
         stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
         stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
+        role_enabled: DEFAULT_ROLE_ENABLED,
+        role_highlight: DEFAULT_ROLE_HIGHLIGHT,
     };
 
     if config_path.exists() {
@@ -256,6 +267,16 @@ pub fn parse_args() -> Result<Config> {
 
     if let Ok(url) = env::var("ADSB_URL") {
         config.url = url;
+    }
+    if let Ok(value) = env::var("ADSB_URLS") {
+        let urls: Vec<String> = value
+            .split(',')
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if !urls.is_empty() {
+            config.urls = urls;
+        }
     }
     if let Ok(value) = env::var("ADSB_REFRESH") {
         if let Ok(secs) = value.parse::<u64>() {
@@ -318,6 +339,26 @@ pub fn parse_args() -> Result<Config> {
     }
     if let Ok(value) = env::var("ADSB_LOG_LEVEL") {
         config.log_level = value;
+    }
+
+    if config.urls.is_empty() {
+        config.urls.push(config.url.clone());
+    }
+    if config.url.trim().is_empty() {
+        if let Some(first) = config.urls.first() {
+            config.url = first.clone();
+        }
+    } else if let Some(first) = config.urls.first() {
+        if first != &config.url {
+            let mut urls = config.urls.clone();
+            urls.retain(|u| !u.trim().is_empty());
+            if urls.is_empty() {
+                urls.push(config.url.clone());
+            } else {
+                urls[0] = config.url.clone();
+            }
+            config.urls = urls;
+        }
     }
     if let Ok(value) = env::var("ADSB_LOG_FILE") {
         config.log_file = value;
@@ -813,6 +854,9 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(url) = file.url {
         target.url = url;
     }
+    if let Some(urls) = file.urls {
+        target.urls = urls;
+    }
     if let Some(refresh) = file.refresh_secs {
         target.refresh = Duration::from_secs(refresh);
     }
@@ -975,6 +1019,12 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     if let Some(stats_metric_3) = file.stats_metric_3 {
         target.stats_metric_3 = stats_metric_3;
     }
+    if let Some(role_enabled) = file.role_enabled {
+        target.role_enabled = role_enabled;
+    }
+    if let Some(role_highlight) = file.role_highlight {
+        target.role_highlight = role_highlight;
+    }
 }
 
 fn print_help() {
@@ -1005,7 +1055,8 @@ fn print_help() {
     println!("       [--flag-style emoji|text|none]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
-    println!("Environment: ADSB_URL overrides the default URL");
+    println!("Environment: ADSB_URL overrides the primary URL");
+    println!("Environment: ADSB_URLS sets comma-separated fallback URLs");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
     println!("Environment: ADSB_ALLOW_HTTP=1 allows http:// URLs");
     println!("Environment: ADSB_ALLOW_INSECURE=1 allows --insecure");
@@ -1035,11 +1086,13 @@ fn print_help() {
 }
 
 fn validate_security(config: &Config) -> Result<()> {
-    let url = config.url.trim();
-    if url.to_ascii_lowercase().starts_with("http://") && !config.allow_http {
-        return Err(anyhow!(
-            "Refusing insecure http URL (set allow_http=true or ADSB_ALLOW_HTTP=1 to override)"
-        ));
+    for url in config.urls.iter().chain(std::iter::once(&config.url)) {
+        let trimmed = url.trim();
+        if trimmed.to_ascii_lowercase().starts_with("http://") && !config.allow_http {
+            return Err(anyhow!(
+                "Refusing insecure http URL (set allow_http=true or ADSB_ALLOW_HTTP=1 to override)"
+            ));
+        }
     }
     if config.insecure && !config.allow_insecure {
         return Err(anyhow!(
@@ -1070,6 +1123,7 @@ mod tests {
     fn base_config() -> Config {
         Config {
             url: DEFAULT_URL.to_string(),
+            urls: vec![DEFAULT_URL.to_string()],
             refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
             insecure: false,
             allow_http: DEFAULT_ALLOW_HTTP,
@@ -1125,6 +1179,8 @@ mod tests {
             stats_metric_1: DEFAULT_STATS_METRIC_1.to_string(),
             stats_metric_2: DEFAULT_STATS_METRIC_2.to_string(),
             stats_metric_3: DEFAULT_STATS_METRIC_3.to_string(),
+            role_enabled: DEFAULT_ROLE_ENABLED,
+            role_highlight: DEFAULT_ROLE_HIGHLIGHT,
         }
     }
 
@@ -1163,6 +1219,8 @@ radar_aspect = 1.2
 radar_renderer = "ascii"
 radar_labels = true
 radar_blip = "block"
+role_enabled = false
+role_highlight = false
 "#;
         fs::write(&path, content).unwrap();
         let cfg = load_file_config(&path).unwrap().unwrap();
@@ -1183,6 +1241,8 @@ radar_blip = "block"
         assert_eq!(cfg.radar_renderer.as_deref(), Some("ascii"));
         assert_eq!(cfg.radar_labels, Some(true));
         assert_eq!(cfg.radar_blip.as_deref(), Some("block"));
+        assert_eq!(cfg.role_enabled, Some(false));
+        assert_eq!(cfg.role_highlight, Some(false));
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(path.parent().unwrap());
     }
@@ -1209,6 +1269,8 @@ radar_blip = "block"
             radar_renderer: Some("ascii".to_string()),
             radar_labels: Some(true),
             radar_blip: Some("plane".to_string()),
+            role_enabled: Some(false),
+            role_highlight: Some(false),
             ..Default::default()
         };
         apply_file_config(&mut cfg, file);
@@ -1230,5 +1292,7 @@ radar_blip = "block"
         assert_eq!(cfg.radar_renderer, "ascii");
         assert!(cfg.radar_labels);
         assert_eq!(cfg.radar_blip, "plane");
+        assert!(!cfg.role_enabled);
+        assert!(!cfg.role_highlight);
     }
 }

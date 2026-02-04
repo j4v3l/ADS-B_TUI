@@ -41,7 +41,7 @@ A modern, fast, and user-friendly terminal interface for tracking aircraft using
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Development Environment Prerequisites
 
 - **Rust** (latest stable version recommended)
 - **ADS-B receiver** or access to an ADS-B data feed
@@ -69,6 +69,7 @@ cargo build --release
 
 1. **Set up your data source**: Edit `adsb-tui.toml` to point to your ADS-B data URL
 2. **Run the application**:
+
    ```bash
    ./adsb-tui
    ```
@@ -135,11 +136,11 @@ API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app con
 ### Configuration Options
 
 | Option | Description | Default |
-|--------|-------------|---------|
+| ------ | ----------- | ------- |
 | `url` | ADS-B data source URL | Required |
 | `refresh_secs` | Data refresh interval (0 = fast refresh, clamped to 200ms) | 2 |
 | `insecure` | Allow self-signed certificates | false |
-| `allow_http` | Allow http:// URLs | false |
+| `allow_http` | Allow http:// URLs | true |
 | `allow_insecure` | Allow --insecure | false |
 | `stale_secs` | Mark data as stale after this many seconds | 60 |
 | `hide_stale` | Hide stale aircraft from the table | false |
@@ -165,7 +166,7 @@ API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app con
 ## 🎮 Controls
 
 | Key | Action |
-|-----|--------|
+| --- | ------ |
 | `↑/↓` | Navigate aircraft list |
 | `s` | Toggle sort |
 | `/` | Filter |
@@ -187,6 +188,7 @@ API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app con
 ADS-B TUI includes comprehensive logging functionality for debugging and monitoring:
 
 ### Quick Start
+
 ```bash
 # Enable logging with default settings
 adsb-tui --log-enabled
@@ -196,6 +198,7 @@ adsb-tui --log-enabled --log-level debug --log-file adsb-tui.log
 ```
 
 ### Log Levels
+
 - `trace` - Most verbose, includes all internal operations
 - `debug` - Detailed debugging information
 - `info` - General information (default)
@@ -203,6 +206,7 @@ adsb-tui --log-enabled --log-level debug --log-file adsb-tui.log
 - `error` - Error messages only
 
 ### Environment Variables
+
 ```bash
 # Override log level via environment
 RUST_LOG=debug adsb-tui
@@ -212,7 +216,9 @@ ADSB_LOG_ENABLED=1 ADSB_LOG_LEVEL=debug adsb-tui
 ```
 
 ### Log Output
+
 Logs include timestamps, log levels, and structured information about:
+
 - Network requests and responses
 - Data parsing and processing
 - UI state changes
@@ -221,7 +227,7 @@ Logs include timestamps, log levels, and structured information about:
 
 ## 🛠️ Development
 
-### Prerequisites
+### Development Prerequisites
 
 - Rust 1.70+ (install via [rustup](https://rustup.rs/))
 - Git
@@ -261,16 +267,19 @@ just build-release
 
 ### Project Structure
 
-```
+```text
 src/
 ├── main.rs      # Application entry point
 ├── app.rs       # Main application logic and state
 ├── ui.rs        # Terminal user interface
 ├── config.rs    # Configuration parsing
+├── logging.rs   # Logging setup
 ├── model.rs     # Data models
 ├── net.rs       # Network fetching
+├── radar.rs     # Radar rendering
 ├── routes.rs    # Flight route handling
 ├── export.rs    # Data export functionality
+├── runtime.rs   # Event loop and task orchestration
 ├── storage.rs   # File storage operations
 └── watchlist.rs # Watchlist management
 ```
@@ -288,7 +297,7 @@ ADS-B TUI works with any ADS-B receiver that provides JSON data in the format us
 
 ### Sample Data URLs
 
-```
+```text
 # Local dump1090
 http://localhost:8080/data/aircraft.json
 
@@ -339,4 +348,4 @@ This project is licensed under the ADS-B TUI Non-Commercial License - see the [L
 
 ---
 
-**Happy flying! ✈️**
+Happy flying! ✈️

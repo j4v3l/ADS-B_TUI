@@ -11,6 +11,7 @@ use toml_edit::DocumentMut;
 use tracing::{debug, info, trace, warn};
 
 use crate::config;
+use crate::lookup::{LookupKind, LookupRequest};
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
 use crate::storage;
 use crate::watchlist::WatchEntry;
@@ -49,6 +50,7 @@ pub enum InputMode {
     Config,
     Legend,
     Watchlist,
+    Lookup,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +188,14 @@ pub enum TrendDir {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AircraftRole {
+    Military,
+    Government,
+    Commercial,
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Trend {
     pub alt: TrendDir,
@@ -315,6 +325,8 @@ pub struct App {
     pub(crate) input_mode: InputMode,
     pub(crate) layout_mode: LayoutMode,
     pub(crate) theme_mode: ThemeMode,
+    pub(crate) role_enabled: bool,
+    pub(crate) role_highlight: bool,
     pub(crate) column_cache_enabled: bool,
     pub(crate) column_cache_ttl: Duration,
     column_width_cache: Option<ColumnWidthCache>,
@@ -383,6 +395,11 @@ pub struct App {
     pub(crate) trail_points: HashMap<String, Vec<TrailPoint>>,
     pub(crate) last_export: Option<(String, SystemTime)>,
     pub(crate) route_error: Option<(String, SystemTime)>,
+    // Lookup modal state
+    pub(crate) lookup_input: String,
+    pub(crate) lookup_status: Option<String>,
+    pub(crate) lookup_results: Option<Vec<Aircraft>>,
+    pub(crate) lookup_busy: bool,
 }
 
 impl App {
@@ -398,6 +415,8 @@ impl App {
         filter: String,
         layout_mode: LayoutMode,
         theme_mode: ThemeMode,
+        role_enabled: bool,
+        role_highlight: bool,
         column_cache_enabled: bool,
         column_cache_ttl: Duration,
         config_path: PathBuf,
@@ -468,6 +487,8 @@ impl App {
             input_mode: InputMode::Normal,
             layout_mode,
             theme_mode,
+            role_enabled,
+            role_highlight,
             column_cache_enabled,
             column_cache_ttl: if column_cache_ttl.is_zero() {
                 Duration::from_millis(400)
@@ -556,6 +577,10 @@ impl App {
             trail_points: HashMap::new(),
             last_export: None,
             route_error: None,
+            lookup_input: String::new(),
+            lookup_status: None,
+            lookup_results: None,
+            lookup_busy: false,
         }
     }
 
@@ -1337,6 +1362,14 @@ impl App {
         self.avg_aircraft_rate
     }
 
+    pub fn classify_aircraft(&self, ac: &Aircraft) -> AircraftRole {
+        if !self.role_enabled {
+            AircraftRole::Unknown
+        } else {
+            classify_aircraft(ac)
+        }
+    }
+
     pub fn route_refresh_due(&mut self, now: SystemTime) -> bool {
         if let Some(until) = self.route_backoff_until {
             if now.duration_since(until).is_err() {
@@ -1394,8 +1427,9 @@ impl App {
             return Vec::new();
         }
         let mut requests = Vec::new();
+        let batch_limit = self.route_batch.min(10);
         for idx in indices {
-            if requests.len() >= self.route_batch {
+            if requests.len() >= batch_limit {
                 break;
             }
             let ac = &self.data.aircraft[*idx];
@@ -1451,7 +1485,9 @@ impl App {
             return;
         }
         self.route_backoff_attempts = self.route_backoff_attempts.saturating_add(1);
-        let backoff = route_backoff_duration(self.route_backoff_attempts);
+        let retry_after = parse_retry_after_hint(message).unwrap_or(0);
+        let backoff = route_backoff_duration(self.route_backoff_attempts)
+            .max(Duration::from_secs(retry_after));
         self.route_backoff_until = Some(now + backoff);
         debug!(
             "route backoff {}s (attempt {}) due to {}",
@@ -1490,6 +1526,67 @@ impl App {
 
     pub fn backspace_filter(&mut self) {
         self.filter_edit.pop();
+    }
+
+    // Lookup modal helpers
+    pub fn open_lookup(&mut self) {
+        self.lookup_input.clear();
+        self.lookup_results = None;
+        self.lookup_status =
+            Some("Enter: hex/callsign/reg/type/squawk/point/mil/ladd/pia".to_string());
+        self.lookup_busy = false;
+        self.input_mode = InputMode::Lookup;
+        debug!("lookup modal opened");
+    }
+
+    pub fn cancel_lookup(&mut self) {
+        self.lookup_input.clear();
+        self.lookup_busy = false;
+        self.input_mode = InputMode::Normal;
+        debug!("lookup modal closed");
+    }
+
+    pub fn push_lookup_char(&mut self, ch: char) {
+        self.lookup_input.push(ch);
+    }
+
+    pub fn backspace_lookup(&mut self) {
+        self.lookup_input.pop();
+    }
+
+    pub fn prepare_lookup_request(&mut self) -> Option<LookupRequest> {
+        if self.lookup_busy {
+            self.lookup_status = Some("Busy...".to_string());
+            return None;
+        }
+        let trimmed = self.lookup_input.trim();
+        if trimmed.is_empty() {
+            self.lookup_status = Some("Enter a query".to_string());
+            return None;
+        }
+        match parse_lookup_input(trimmed) {
+            Some(kind) => {
+                self.lookup_busy = true;
+                self.lookup_status = Some("Fetching...".to_string());
+                Some(LookupRequest { kind })
+            }
+            None => {
+                self.lookup_status = Some("Unrecognized query".to_string());
+                None
+            }
+        }
+    }
+
+    pub fn apply_lookup_result(&mut self, data: ApiResponse) {
+        let count = data.aircraft.len();
+        self.lookup_results = Some(data.aircraft);
+        self.lookup_status = Some(format!("{} result(s)", count));
+        self.lookup_busy = false;
+    }
+
+    pub fn apply_lookup_error(&mut self, err: String) {
+        self.lookup_status = Some(format!("Error: {err}"));
+        self.lookup_busy = false;
     }
 
     pub fn trend_for(&self, ac: &Aircraft) -> Trend {
@@ -1987,6 +2084,135 @@ fn is_rate_limited_message(message: &str) -> bool {
         || msg.contains("rate limit")
 }
 
+fn classify_aircraft(ac: &Aircraft) -> AircraftRole {
+    let callsign = ac
+        .flight
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
+    let owner = ac.own_op.as_deref().unwrap_or("").to_ascii_lowercase();
+    let ac_type = ac.t.as_deref().unwrap_or("").to_ascii_uppercase();
+    let desc = ac.desc.as_deref().unwrap_or("").to_ascii_lowercase();
+    let category = ac.category.as_deref().unwrap_or("").to_ascii_lowercase();
+
+    if matches_prefix(&callsign, &military_callsign_prefixes()) {
+        return AircraftRole::Military;
+    }
+
+    if matches_prefix(&callsign, &government_callsign_prefixes()) {
+        return AircraftRole::Government;
+    }
+
+    if contains_any(&owner, &military_owner_keywords())
+        || contains_any(&desc, &military_owner_keywords())
+        || likely_military_type(&ac_type)
+        || category.contains("mil")
+    {
+        return AircraftRole::Military;
+    }
+
+    if contains_any(&owner, &government_owner_keywords())
+        || contains_any(&desc, &government_owner_keywords())
+        || matches_prefix(&callsign, &government_callsign_prefixes())
+    {
+        return AircraftRole::Government;
+    }
+
+    AircraftRole::Commercial
+}
+
+fn matches_prefix(value: &str, prefixes: &[&str]) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    prefixes
+        .iter()
+        .any(|p| value.starts_with(p) && value.len() >= p.len())
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    let lower = value.to_ascii_lowercase();
+    needles.iter().any(|n| lower.contains(n))
+}
+
+fn likely_military_type(ac_type: &str) -> bool {
+    let prefixes = [
+        "C17", "C-17", "C130", "C-130", "K35", "KC10", "KC-10", "KC46", "E3", "E-3", "E6", "E-6",
+        "P8", "P-8", "P3", "P-3", "B52", "B-52", "F1", "F2", "F3", "F4", "F5", "F6", "F14", "F15",
+        "F16", "F18", "F22", "F35",
+    ];
+    let upper = ac_type.to_ascii_uppercase();
+    prefixes.iter().any(|p| upper.starts_with(p))
+}
+
+fn military_callsign_prefixes() -> Vec<&'static str> {
+    vec![
+        "RCH", "MC", "MAF", "NAF", "BAF", "GAF", "LAGR", "TEXAN", "PAT", "SAM", "SPAR", "ASF",
+        "CFC", "CAF", "HK", "VV", "VM", "AF", "SEN", "CNV", "JENA", "KING",
+    ]
+}
+
+fn government_callsign_prefixes() -> Vec<&'static str> {
+    vec![
+        "NATION", "GOV", "GVT", "POL", "RIDER", "EAG", "EAGLE", "COAST", "CST",
+    ]
+}
+
+fn military_owner_keywords() -> Vec<&'static str> {
+    vec![
+        "air force",
+        "navy",
+        "marine",
+        "marines",
+        "army",
+        "usaf",
+        "usn",
+        "usmc",
+        "uscg",
+        "raf",
+        "rcaf",
+        "luftwaffe",
+        "bundeswehr",
+        "aeronautica",
+        "military",
+        "defence",
+        "defense",
+        "armée",
+        "ejército",
+    ]
+}
+
+fn government_owner_keywords() -> Vec<&'static str> {
+    vec![
+        "government",
+        "gov",
+        "border",
+        "customs",
+        "police",
+        "gendarmerie",
+        "coast guard",
+        "homeland",
+        "cbp",
+        "state",
+        "federal",
+        "department",
+        "ministry",
+    ]
+}
+
+fn parse_retry_after_hint(message: &str) -> Option<u64> {
+    message
+        .split(|c: char| [' ', '(', ')'].contains(&c))
+        .find_map(|part| {
+            if let Some(rest) = part.strip_prefix("retry-after=") {
+                rest.trim_end_matches('s').parse::<u64>().ok()
+            } else {
+                None
+            }
+        })
+}
+
 fn route_backoff_duration(attempts: u32) -> Duration {
     if attempts == 0 {
         return Duration::from_secs(0);
@@ -2005,6 +2231,68 @@ fn match_text(needle: &str, haystack: &str, mode: &str) -> bool {
         "contains" => haystack.contains(needle),
         _ => haystack == needle,
     }
+}
+
+fn parse_lookup_input(input: &str) -> Option<LookupKind> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Allow prefix forms like "hex:abc" or tokenized "hex abc".
+    let (head, tail_opt) = if let Some(idx) = trimmed.find(':') {
+        let (h, rest) = trimmed.split_at(idx);
+        (
+            h.trim().to_ascii_lowercase(),
+            Some(rest[1..].trim().to_string()),
+        )
+    } else {
+        let mut parts = trimmed.split_whitespace();
+        let h = parts.next()?.to_ascii_lowercase();
+        let rest = parts.collect::<Vec<_>>().join(" ");
+        (h, if rest.is_empty() { None } else { Some(rest) })
+    };
+
+    match head.as_str() {
+        "hex" => Some(LookupKind::Hex(split_list(tail_opt?))),
+        "callsign" | "call" | "cs" => Some(LookupKind::Callsign(split_list(tail_opt?))),
+        "reg" | "registration" => Some(LookupKind::Reg(split_list(tail_opt?))),
+        "type" => Some(LookupKind::Type(split_list(tail_opt?))),
+        "squawk" | "sqk" => Some(LookupKind::Squawk(split_list(tail_opt?))),
+        "point" => parse_point(tail_opt?),
+        "mil" => Some(LookupKind::Mil),
+        "ladd" => Some(LookupKind::Ladd),
+        "pia" => Some(LookupKind::Pia),
+        // If no prefix, treat free text as callsign lookup.
+        _ => {
+            if let Some(rest) = tail_opt {
+                Some(LookupKind::Callsign(split_list(format!("{head} {rest}"))))
+            } else {
+                Some(LookupKind::Callsign(vec![head]))
+            }
+        }
+    }
+}
+
+fn split_list(text: String) -> Vec<String> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_point(args: String) -> Option<LookupKind> {
+    let parts: Vec<_> = args
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let lat = parts[0].trim().parse::<f64>().ok()?;
+    let lon = parts[1].trim().parse::<f64>().ok()?;
+    let radius = parts[2].trim().parse::<f64>().ok()?;
+    Some(LookupKind::Point { lat, lon, radius })
 }
 
 fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteInfo>) -> bool {
@@ -2616,8 +2904,8 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches, App,
-        ConfigKind, RadarBlip, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
+        compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches,
+        AircraftRole, App, ConfigKind, RadarBlip, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
     };
     use crate::model::Aircraft;
     use std::collections::HashSet;
@@ -2634,6 +2922,58 @@ mod tests {
             category: Some("A3".to_string()),
             ..Aircraft::default()
         }
+    }
+
+    fn make_app(role_enabled: bool, role_highlight: bool) -> App {
+        App::new(
+            "http://example".to_string(),
+            Duration::from_secs(1),
+            60.0,
+            false,
+            5,
+            8,
+            HashSet::new(),
+            String::new(),
+            crate::app::LayoutMode::Full,
+            crate::app::ThemeMode::Default,
+            role_enabled,
+            role_highlight,
+            true,
+            Duration::from_millis(400),
+            PathBuf::from("adsb-tui.toml"),
+            3,
+            None,
+            None,
+            false,
+            200.0,
+            1.0,
+            crate::app::RadarRenderer::Canvas,
+            false,
+            crate::app::RadarBlip::Dot,
+            false,
+            false,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1,
+            10,
+            true,
+            true,
+            Duration::from_millis(300),
+            0.2,
+            10.0,
+            0.5,
+            Duration::from_secs(60),
+            true,
+            true,
+            true,
+            crate::app::FlagStyle::Emoji,
+            "msg_rate_total".to_string(),
+            "kbps_total".to_string(),
+            "msg_rate_avg".to_string(),
+            true,
+            Some(PathBuf::from("adsb-watchlist.toml")),
+            Vec::new(),
+        )
     }
 
     #[test]
@@ -2755,6 +3095,8 @@ mod tests {
             crate::app::LayoutMode::Full,
             crate::app::ThemeMode::Default,
             true,
+            true,
+            true,
             Duration::from_millis(400),
             PathBuf::from("adsb-tui.toml"),
             3,
@@ -2794,6 +3136,24 @@ mod tests {
         let ac = sample_aircraft();
         let entry = app.watch_entry_for(&ac).unwrap();
         assert_eq!(entry.entry_id(), "high");
+    }
+
+    #[test]
+    fn role_disabled_masks_classification() {
+        let mut ac = sample_aircraft();
+        ac.flight = Some("RCH123".to_string()); // military prefix
+
+        let app = make_app(false, true);
+        assert!(matches!(app.classify_aircraft(&ac), AircraftRole::Unknown));
+    }
+
+    #[test]
+    fn role_enabled_classifies_military() {
+        let mut ac = sample_aircraft();
+        ac.flight = Some("RCH123".to_string());
+
+        let app = make_app(true, true);
+        assert!(matches!(app.classify_aircraft(&ac), AircraftRole::Military));
     }
 
     #[test]
