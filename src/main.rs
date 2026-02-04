@@ -25,7 +25,7 @@ use net::spawn_fetcher;
 use routes::spawn_route_fetcher;
 use runtime::{init_terminal, restore_terminal, run_app, LookupChannels, RouteChannels};
 use std::path::PathBuf;
-use storage::{load_favorites, load_watchlist};
+use storage::{ensure_watchlist_file, load_favorites, load_watchlist};
 use tracing::{debug, info, warn};
 
 fn main() -> Result<()> {
@@ -80,15 +80,19 @@ fn main() -> Result<()> {
         Some(PathBuf::from(config.watchlist_file))
     };
     let mut watchlist = Vec::new();
-    if config.watchlist_enabled {
-        if let Some(path) = watchlist_path.as_ref() {
-            if let Ok(entries) = load_watchlist(path) {
-                watchlist = entries;
-            } else {
-                warn!("failed to load watchlist from {}", path.display());
+    if let Some(path) = watchlist_path.as_ref() {
+        if let Ok(created) = ensure_watchlist_file(path) {
+            if created {
+                info!("watchlist template created at {}", path.display());
             }
         }
+        if let Ok(entries) = load_watchlist(path) {
+            watchlist = entries;
+        } else if config.watchlist_enabled {
+            warn!("failed to load watchlist from {}", path.display());
+        }
     }
+    let watchlist_enabled = config.watchlist_enabled || !watchlist.is_empty();
 
     let layout_mode = LayoutMode::from_str(&config.layout);
     let theme_mode = ThemeMode::from_str(&config.theme);
@@ -189,7 +193,7 @@ fn main() -> Result<()> {
             config.stats_metric_1.clone(),
             config.stats_metric_2.clone(),
             config.stats_metric_3.clone(),
-            config.watchlist_enabled,
+            watchlist_enabled,
             watchlist_path.clone(),
             watchlist,
         ),

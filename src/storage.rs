@@ -52,9 +52,48 @@ pub fn save_watchlist(path: &Path, entries: &[WatchEntry]) -> Result<()> {
     Ok(())
 }
 
+pub fn ensure_watchlist_file(path: &Path) -> Result<bool> {
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create watchlist dir: {}", parent.display()))?;
+    }
+    let template = r#"# ADSB-TUI Watchlist
+# Each entry is a [[watchlist]] table.
+# match: hex | callsign | reg | type | owner | category | route
+# mode: exact | prefix | contains
+# enabled/notify: true or false
+
+[[watchlist]]
+label = "Example: Callsign prefix"
+match = "callsign"
+value = "SWA"
+mode = "prefix"
+notify = true
+enabled = true
+priority = 1
+
+[[watchlist]]
+label = "Example: Hex"
+match = "hex"
+value = "ac6668"
+mode = "exact"
+notify = true
+enabled = true
+priority = 0
+"#;
+    fs::write(path, template)
+        .with_context(|| format!("Failed to write watchlist template: {}", path.display()))?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{load_favorites, load_watchlist, save_favorites, save_watchlist};
+    use super::{
+        ensure_watchlist_file, load_favorites, load_watchlist, save_favorites, save_watchlist,
+    };
     use crate::watchlist::WatchEntry;
     use std::collections::HashSet;
     use std::fs;
@@ -108,6 +147,18 @@ mod tests {
         assert_eq!(loaded[0].match_type, "hex");
         assert_eq!(loaded[0].value, "ac6668");
         assert_eq!(loaded[0].notify, Some(false));
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(path.parent().unwrap());
+    }
+
+    #[test]
+    fn watchlist_template_created() {
+        let path = temp_file("watchlist-template.toml");
+        assert!(!path.exists());
+        let created = ensure_watchlist_file(&path).unwrap();
+        assert!(created);
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("[[watchlist]]"));
         let _ = fs::remove_file(&path);
         let _ = fs::remove_dir(path.parent().unwrap());
     }

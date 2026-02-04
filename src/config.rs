@@ -49,6 +49,334 @@ pub const DEFAULT_RADAR_BLIP: &str = "dot";
 pub const DEFAULT_ROLE_ENABLED: bool = true;
 pub const DEFAULT_ROLE_HIGHLIGHT: bool = true;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigKind {
+    Str,
+    Bool,
+    Int,
+    Float,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ConfigValue {
+    Str(&'static str),
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+}
+
+impl ConfigValue {
+    pub fn to_string_value(self) -> String {
+        match self {
+            ConfigValue::Str(value) => value.to_string(),
+            ConfigValue::Bool(value) => value.to_string(),
+            ConfigValue::Int(value) => value.to_string(),
+            ConfigValue::Float(value) => format!("{value}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ConfigSpec {
+    pub key: &'static str,
+    pub kind: ConfigKind,
+    pub default: Option<ConfigValue>,
+}
+
+impl ConfigSpec {
+    pub fn default_string(self) -> String {
+        self.default
+            .map(|value| value.to_string_value())
+            .unwrap_or_default()
+    }
+}
+
+pub fn config_specs() -> &'static [ConfigSpec] {
+    static SPECS: &[ConfigSpec] = &[
+        ConfigSpec {
+            key: "url",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_URL)),
+        },
+        ConfigSpec {
+            key: "refresh_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_REFRESH_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "insecure",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(false)),
+        },
+        ConfigSpec {
+            key: "allow_http",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_ALLOW_HTTP)),
+        },
+        ConfigSpec {
+            key: "allow_insecure",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(false)),
+        },
+        ConfigSpec {
+            key: "stale_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_STALE_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "low_nic",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_LOW_NIC)),
+        },
+        ConfigSpec {
+            key: "low_nac",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_LOW_NAC)),
+        },
+        ConfigSpec {
+            key: "trail_len",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_TRAIL_LEN as i64)),
+        },
+        ConfigSpec {
+            key: "hide_stale",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_HIDE_STALE)),
+        },
+        ConfigSpec {
+            key: "favorites_file",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_FAVORITES_FILE)),
+        },
+        ConfigSpec {
+            key: "api_key",
+            kind: ConfigKind::Str,
+            default: None,
+        },
+        ConfigSpec {
+            key: "api_key_header",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_API_KEY_HEADER)),
+        },
+        ConfigSpec {
+            key: "log_enabled",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(false)),
+        },
+        ConfigSpec {
+            key: "log_level",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str("info")),
+        },
+        ConfigSpec {
+            key: "log_file",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str("adsb-tui.log")),
+        },
+        ConfigSpec {
+            key: "watchlist_enabled",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_WATCHLIST_ENABLED)),
+        },
+        ConfigSpec {
+            key: "watchlist_file",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_WATCHLIST_FILE)),
+        },
+        ConfigSpec {
+            key: "filter",
+            kind: ConfigKind::Str,
+            default: None,
+        },
+        ConfigSpec {
+            key: "layout",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str("full")),
+        },
+        ConfigSpec {
+            key: "theme",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str("default")),
+        },
+        ConfigSpec {
+            key: "radar_range_nm",
+            kind: ConfigKind::Float,
+            default: Some(ConfigValue::Float(DEFAULT_RADAR_RANGE_NM)),
+        },
+        ConfigSpec {
+            key: "radar_aspect",
+            kind: ConfigKind::Float,
+            default: Some(ConfigValue::Float(DEFAULT_RADAR_ASPECT)),
+        },
+        ConfigSpec {
+            key: "radar_renderer",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_RADAR_RENDERER)),
+        },
+        ConfigSpec {
+            key: "radar_labels",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_RADAR_LABELS)),
+        },
+        ConfigSpec {
+            key: "radar_blip",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_RADAR_BLIP)),
+        },
+        ConfigSpec {
+            key: "site_lat",
+            kind: ConfigKind::Float,
+            default: None,
+        },
+        ConfigSpec {
+            key: "site_lon",
+            kind: ConfigKind::Float,
+            default: None,
+        },
+        ConfigSpec {
+            key: "site_alt_m",
+            kind: ConfigKind::Float,
+            default: None,
+        },
+        ConfigSpec {
+            key: "demo_mode",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_DEMO_MODE)),
+        },
+        ConfigSpec {
+            key: "route_enabled",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(true)),
+        },
+        ConfigSpec {
+            key: "route_base",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_ROUTE_BASE)),
+        },
+        ConfigSpec {
+            key: "route_mode",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_ROUTE_MODE)),
+        },
+        ConfigSpec {
+            key: "route_path",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_ROUTE_PATH)),
+        },
+        ConfigSpec {
+            key: "route_ttl_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_ROUTE_TTL_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "route_refresh_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_ROUTE_REFRESH_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "route_batch",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_ROUTE_BATCH as i64)),
+        },
+        ConfigSpec {
+            key: "route_timeout_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_ROUTE_TIMEOUT_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "ui_fps",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_UI_FPS as i64)),
+        },
+        ConfigSpec {
+            key: "smooth_mode",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_SMOOTH_MODE)),
+        },
+        ConfigSpec {
+            key: "smooth_merge",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_SMOOTH_MERGE)),
+        },
+        ConfigSpec {
+            key: "rate_window_ms",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_RATE_WINDOW_MS as i64)),
+        },
+        ConfigSpec {
+            key: "rate_min_secs",
+            kind: ConfigKind::Float,
+            default: Some(ConfigValue::Float(DEFAULT_RATE_MIN_SECS)),
+        },
+        ConfigSpec {
+            key: "notify_radius_mi",
+            kind: ConfigKind::Float,
+            default: Some(ConfigValue::Float(DEFAULT_NOTIFY_RADIUS_MI)),
+        },
+        ConfigSpec {
+            key: "overpass_mi",
+            kind: ConfigKind::Float,
+            default: Some(ConfigValue::Float(DEFAULT_OVERPASS_MI)),
+        },
+        ConfigSpec {
+            key: "notify_cooldown_secs",
+            kind: ConfigKind::Int,
+            default: Some(ConfigValue::Int(DEFAULT_NOTIFY_COOLDOWN_SECS as i64)),
+        },
+        ConfigSpec {
+            key: "altitude_trend_arrows",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_ALTITUDE_TREND_ARROWS)),
+        },
+        ConfigSpec {
+            key: "track_arrows",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_TRACK_ARROWS)),
+        },
+        ConfigSpec {
+            key: "stats_metric_1",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_STATS_METRIC_1)),
+        },
+        ConfigSpec {
+            key: "stats_metric_2",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_STATS_METRIC_2)),
+        },
+        ConfigSpec {
+            key: "stats_metric_3",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_STATS_METRIC_3)),
+        },
+        ConfigSpec {
+            key: "column_cache",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_COLUMN_CACHE)),
+        },
+        ConfigSpec {
+            key: "flags_enabled",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_FLAGS_ENABLED)),
+        },
+        ConfigSpec {
+            key: "flag_style",
+            kind: ConfigKind::Str,
+            default: Some(ConfigValue::Str(DEFAULT_FLAG_STYLE)),
+        },
+        ConfigSpec {
+            key: "role_enabled",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_ROLE_ENABLED)),
+        },
+        ConfigSpec {
+            key: "role_highlight",
+            kind: ConfigKind::Bool,
+            default: Some(ConfigValue::Bool(DEFAULT_ROLE_HIGHLIGHT)),
+        },
+    ];
+    SPECS
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub url: String,
