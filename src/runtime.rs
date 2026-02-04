@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::app::{App, InputMode, LayoutMode};
 use crate::export;
+use crate::lookup::{LookupMessage, LookupRequest};
 use crate::model::ApiResponse;
 use crate::routes::{RouteMessage, RouteRequest};
 use crate::storage;
@@ -47,6 +48,7 @@ pub fn run_app(
     mut app: App,
     rx: Receiver<Result<ApiResponse, String>>,
     routes: Option<RouteChannels>,
+    lookup: Option<LookupChannels>,
 ) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
     info!("runtime loop started");
@@ -78,6 +80,16 @@ pub fn run_app(
                         error!("route error: {err}");
                         app.set_route_error(err);
                     }
+                }
+                dirty = true;
+            }
+        }
+
+        if let Some(lookup) = &lookup {
+            while let Ok(message) = lookup.res_rx.try_recv() {
+                match message {
+                    LookupMessage::Result(data) => app.apply_lookup_result(data),
+                    LookupMessage::Error(err) => app.apply_lookup_error(err),
                 }
                 dirty = true;
             }
@@ -130,6 +142,7 @@ pub fn run_app(
                         }
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
+                        KeyCode::Char('g') | KeyCode::Char('G') => app.open_lookup(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
                         KeyCode::Char('e') => match export::export_csv(&app, &indices) {
@@ -250,6 +263,26 @@ pub fn run_app(
                         }
                         _ => {}
                     },
+                    InputMode::Lookup => match key.code {
+                        KeyCode::Esc => app.cancel_lookup(),
+                        KeyCode::Enter => {
+                            if let Some(req) = app.prepare_lookup_request() {
+                                if let Some(channels) = &lookup {
+                                    let _ = channels.req_tx.send(req);
+                                } else {
+                                    app.apply_lookup_error("Lookup unavailable".to_string());
+                                }
+                            }
+                        }
+                        KeyCode::Backspace => app.backspace_lookup(),
+                        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            if ch == 'u' {
+                                app.lookup_input.clear();
+                            }
+                        }
+                        KeyCode::Char(ch) => app.push_lookup_char(ch),
+                        _ => {}
+                    },
                 },
                 Event::Mouse(mouse) => {
                     handle_mouse(&mut app, &indices, mouse);
@@ -271,13 +304,14 @@ pub fn run_app(
             if app.route_enabled() && app.route_refresh_due(now) {
                 if app.route_tar1090() {
                     let _ = routes.req_tx.send(Vec::new());
+                    app.mark_route_poll(now);
                 } else {
                     let requests = app.collect_route_requests(&indices, now);
                     if !requests.is_empty() {
                         let _ = routes.req_tx.send(requests);
+                        app.mark_route_poll(now);
                     }
                 }
-                app.mark_route_poll(now);
             }
         }
 
@@ -307,6 +341,11 @@ fn is_draw_due(now: SystemTime, last_draw: Option<SystemTime>, interval: Duratio
 pub struct RouteChannels {
     pub req_tx: Sender<Vec<RouteRequest>>,
     pub res_rx: Receiver<RouteMessage>,
+}
+
+pub struct LookupChannels {
+    pub req_tx: Sender<LookupRequest>,
+    pub res_rx: Receiver<LookupMessage>,
 }
 
 fn handle_mouse(app: &mut App, indices: &[usize], mouse: MouseEvent) {

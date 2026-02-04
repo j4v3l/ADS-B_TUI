@@ -33,7 +33,7 @@ allow_http = true
 ### Data Source Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `url` | string | *required* | URL of your ADS-B data source |
 | `refresh_secs` | number | 2 | How often to fetch new data (0 = fast refresh, clamped to 200ms) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
@@ -47,14 +47,14 @@ allow_http = true
 ### Data Quality Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `low_nic` | number | 5 | Minimum Navigation Integrity Category |
 | `low_nac` | number | 8 | Minimum Navigation Accuracy Category |
 
 ### Display Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `flags_enabled` | boolean | true | Show country flags for aircraft |
 | `flag_style` | string | "emoji" | Flag style ("emoji", "text", "none") |
 | `demo_mode` | boolean | false | Hide location values (distance/bearing/site alt, aircraft lat/lon, trail coords) |
@@ -68,38 +68,42 @@ allow_http = true
 | `smooth_mode` | boolean | true | Enable smooth scrolling |
 | `altitude_trend_arrows` | boolean | true | Show altitude trend arrows |
 | `track_arrows` | boolean | true | Show track direction arrows |
+| `role_enabled` | boolean | true | Enable role classification and role display in details |
+| `role_highlight` | boolean | true | Highlight rows for classified roles (requires `role_enabled`) |
 
 ### Route Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `route_enabled` | boolean | true | Enable flight route display |
-| `route_base` | string | "https://api.adsb.lol" | Route data API base URL |
-| `route_mode` | string | "routeset" | Route data mode |
+| `route_base` | string | "<https://api.airplanes.live>" | Route data API base URL |
+| `route_mode` | string | "routeset" | Route data mode ("routeset" for airplanes.live/adsb.lol, "tar1090" for local JSON) |
 | `route_path` | string | "tar1090/data/routes.json" | Route data path |
-| `route_ttl_secs` | number | 0 | Route cache time-to-live |
-| `route_refresh_secs` | number | 0 | Route refresh interval |
+| `route_ttl_secs` | number | 3600 | Route cache time-to-live |
+| `route_refresh_secs` | number | 15 | Route refresh interval |
 | `route_batch` | number | 20 | Batch size for route requests |
 | `route_timeout_secs` | number | 6 | Route request timeout |
+
+Default route queries use the airplanes.live routeset endpoint. To fall back to adsb.lol, set `route_base` to `"https://api.adsb.lol"` and keep `route_mode = "routeset"`.
 
 ### File Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `favorites_file` | string | "adsb-favorites.txt" | Path to favorites file |
 | `filter` | string | "" | Aircraft filter expression |
 
 ### UI Layout Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `layout` | string | "full" | UI layout mode ("full", "compact", "radar") |
 | `theme` | string | "default" | Color theme ("default", "color", "amber", "ocean", "matrix", "mono") |
 
 ### Performance Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `column_cache` | boolean | true | Cache column calculations |
 | `rate_window_ms` | number | 500 | Rate calculation window |
 | `rate_min_secs` | number | 0.4 | Minimum rate interval |
@@ -107,7 +111,7 @@ allow_http = true
 ### Notification Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `notify_radius_mi` | number | 10.0 | Notification radius in miles |
 | `overpass_mi` | number | 0.5 | Overpass distance threshold |
 | `notify_cooldown_secs` | number | 120 | Notification cooldown period |
@@ -115,7 +119,7 @@ allow_http = true
 ### Location Settings
 
 | Setting | Type | Default | Description |
-|---------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `site_lat` | number | *required* | Your location latitude |
 | `site_lon` | number | *required* | Your location longitude |
 | `site_alt_m` | number | *required* | Your location altitude in meters |
@@ -209,16 +213,19 @@ ADS-B TUI respects some environment variables:
 ### Common Issues
 
 **"Connection refused" errors:**
+
 - Check that your ADS-B receiver is running
 - Verify the URL in your configuration
 - Ensure firewall allows connections
 
 **"No aircraft displayed":**
+
 - Check `low_nic` and `low_nac` settings
 - Verify your location coordinates are correct
 - Check `stale_secs` setting
 
 **Performance issues:**
+
 - Increase `refresh_secs` to reduce load
 - Decrease `ui_fps` if UI is laggy
 - Enable `column_cache` for better performance
