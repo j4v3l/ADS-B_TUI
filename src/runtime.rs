@@ -142,6 +142,9 @@ pub fn run_app(
                         }
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
+                        KeyCode::Char('a') => {
+                            app.add_watchlist_from_selected(&indices);
+                        }
                         KeyCode::Char('g') | KeyCode::Char('G') => app.open_lookup(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.open_watchlist(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.open_help(),
@@ -201,6 +204,9 @@ pub fn run_app(
                         KeyCode::Down => app.next_watchlist_item(),
                         KeyCode::PageUp => app.watchlist_page_up(10),
                         KeyCode::PageDown => app.watchlist_page_down(10),
+                        KeyCode::Char('a') => {
+                            app.add_watchlist_from_selected(&indices);
+                        }
                         KeyCode::Char('e') => {
                             app.toggle_watchlist_enabled_selected();
                         }

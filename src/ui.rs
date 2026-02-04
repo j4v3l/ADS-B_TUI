@@ -1041,6 +1041,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  m          Columns menu"),
         Line::from("  g          Lookup modal"),
         Line::from("  w          Watchlist"),
+        Line::from("  a          Add to watchlist (from list)"),
         Line::from(""),
         Line::from(Span::styled(
             "Filter & Favorites",
@@ -1266,22 +1267,26 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(Clear, popup);
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::styled(
-        "WATCHLIST",
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
     let path_text = app
         .watchlist_path()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "--".to_string());
-    lines.push(Line::from(Span::styled(
-        format!("FILE {path_text}"),
-        Style::default().fg(theme.dim),
-    )));
-    lines.push(Line::from(""));
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "WATCHLIST",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("FILE  {path_text}"),
+            Style::default().fg(theme.dim),
+        )),
+        Line::from(Span::styled(
+            "STATE  N  LABEL               MATCH                        MODE",
+            Style::default().fg(theme.dim),
+        )),
+    ];
 
     let reserved = 4;
     let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
@@ -1296,8 +1301,17 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
     let end = (start + items_height).min(total_items);
 
     if total_items == 0 {
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "No watchlist entries.",
+            "No watchlist entries yet.",
+            Style::default().fg(theme.dim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Add from list: select aircraft, press 'a'.",
+            Style::default().fg(theme.dim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Match types: hex | callsign | reg | type | owner | category | route",
             Style::default().fg(theme.dim),
         )));
     } else {
@@ -1313,7 +1327,7 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
             let mode = entry.match_mode();
             let match_text = format!("{}={}", entry.match_type, entry.value);
             let text = format!(
-                "{enabled} {notify}  {:<18}  {}  ({})",
+                "{enabled:<3}  {notify:^1}  {:<18}  {:<28}  {:<7}",
                 truncate(label, 18),
                 truncate(&match_text, 28),
                 mode
@@ -1334,8 +1348,9 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
     }
 
     lines.push(Line::from(""));
+    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "e toggle enabled • n toggle notify • d delete • s save",
+        "a add from list  •  e enable  •  n notify  •  d delete  •  s save",
         Style::default().fg(theme.dim),
     )));
     lines.push(Line::from(Span::styled(
@@ -1386,35 +1401,36 @@ fn render_lookup_menu(f: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(theme.dim)
     };
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::styled(
-        "LOOKUP",
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(vec![
-        Span::styled("SUPPORTS ", label),
-        Span::styled(supports, Style::default().fg(theme.dim)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("QUERY    ", label),
-        Span::styled(
-            query,
-            Style::default().fg(theme.highlight_fg).bg(theme.header_bg),
-        ),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("STATUS   ", label),
-        Span::styled(status_text, status_style),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("EXAMPLES ", label),
-        Span::styled(
-            "hex abc123 | reg n123ab | point 37.6 -122.3 50",
-            Style::default().fg(theme.dim),
-        ),
-    ]));
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "LOOKUP",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("SUPPORTS ", label),
+            Span::styled(supports, Style::default().fg(theme.dim)),
+        ]),
+        Line::from(vec![
+            Span::styled("QUERY    ", label),
+            Span::styled(
+                query,
+                Style::default().fg(theme.highlight_fg).bg(theme.header_bg),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("STATUS   ", label),
+            Span::styled(status_text, status_style),
+        ]),
+        Line::from(vec![
+            Span::styled("EXAMPLES ", label),
+            Span::styled(
+                "hex abc123 | reg n123ab | point 37.6 -122.3 50",
+                Style::default().fg(theme.dim),
+            ),
+        ]),
+    ];
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(

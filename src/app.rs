@@ -251,19 +251,11 @@ pub struct Notification {
     pub at: SystemTime,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ConfigKind {
-    Str,
-    Bool,
-    Int,
-    Float,
-}
-
 #[derive(Clone, Debug)]
 pub struct ConfigItem {
     pub key: String,
     pub value: String,
-    pub kind: ConfigKind,
+    pub kind: config::ConfigKind,
 }
 
 #[derive(Clone, Debug)]
@@ -754,6 +746,60 @@ impl App {
                 });
             }
         }
+    }
+
+    pub fn add_watchlist_from_selected(&mut self, indices: &[usize]) -> bool {
+        if !self.watchlist_enabled {
+            self.watchlist_enabled = true;
+        }
+        if let Some(path) = self.watchlist_path.as_ref() {
+            if let Ok(created) = storage::ensure_watchlist_file(path) {
+                if created {
+                    self.notifications.push(Notification {
+                        message: format!("WATCHLIST template created {}", path.display()),
+                        at: SystemTime::now(),
+                    });
+                }
+            }
+        }
+        let Some(selected) = self.table_state.selected() else {
+            return false;
+        };
+        let Some(idx) = indices.get(selected) else {
+            return false;
+        };
+        let Some(ac) = self.data.aircraft.get(*idx) else {
+            return false;
+        };
+        let Some(entry) = make_watchlist_entry(ac) else {
+            return false;
+        };
+        let entry_key = watchlist_entry_key(&entry);
+        if self
+            .watchlist
+            .iter()
+            .any(|existing| watchlist_entry_key(existing) == entry_key)
+        {
+            self.notifications.push(Notification {
+                message: "WATCHLIST already exists".to_string(),
+                at: SystemTime::now(),
+            });
+            return false;
+        }
+        self.watchlist.push(entry.clone());
+        self.watchlist_cursor = self.watchlist.len().saturating_sub(1);
+        self.save_watchlist();
+        let entry_id = entry.entry_id();
+        let label = entry
+            .label
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(entry_id.as_str());
+        self.notifications.push(Notification {
+            message: format!("WATCHLIST added {label}"),
+            at: SystemTime::now(),
+        });
+        true
     }
 
     pub fn toggle_watchlist_enabled_selected(&mut self) -> bool {
@@ -2352,6 +2398,87 @@ fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteIn
     }
 }
 
+fn make_watchlist_entry(ac: &Aircraft) -> Option<WatchEntry> {
+    if let Some(callsign) = ac
+        .flight
+        .as_deref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        let label =
+            ac.r.as_deref()
+                .map(|reg| format!("{callsign} {reg}"))
+                .unwrap_or_else(|| callsign.to_string());
+        return Some(WatchEntry {
+            id: None,
+            label: Some(label),
+            match_type: "callsign".to_string(),
+            value: callsign.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(hex) = ac
+        .hex
+        .as_deref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("HEX {hex}")),
+            match_type: "hex".to_string(),
+            value: hex.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(reg) = ac.r.as_deref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("REG {reg}")),
+            match_type: "reg".to_string(),
+            value: reg.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(ac_type) = ac.t.as_deref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("TYPE {ac_type}")),
+            match_type: "type".to_string(),
+            value: ac_type.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    None
+}
+
+fn watchlist_entry_key(entry: &WatchEntry) -> String {
+    let match_type = entry.match_type.trim().to_ascii_lowercase();
+    let value = entry.value.trim();
+    let normalized = match match_type.as_str() {
+        "hex" | "icao" | "icao_hex" => normalize_hex(value),
+        "callsign" | "flight" | "cs" => normalize_callsign(value),
+        _ => normalize_text(value),
+    };
+    format!("{match_type}:{normalized}")
+}
+
 fn compare_i64(prev: Option<i64>, current: Option<i64>) -> TrendDir {
     match (prev, current) {
         (Some(p), Some(c)) if c > p => TrendDir::Up,
@@ -2582,256 +2709,53 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         .and_then(|content| toml::from_str::<Value>(&content).ok());
     let table = file_value.and_then(|value| value.as_table().cloned());
 
+    let mut items = default_config_items();
     if let Some(map) = table.as_ref() {
-        let mut items = Vec::new();
+        let mut index = HashMap::new();
+        for (idx, item) in items.iter().enumerate() {
+            index.insert(item.key.clone(), idx);
+        }
+        let mut extras = Vec::new();
         for (key, value) in map {
             let kind = match value {
-                Value::String(_) => ConfigKind::Str,
-                Value::Integer(_) => ConfigKind::Int,
-                Value::Float(_) => ConfigKind::Float,
-                Value::Boolean(_) => ConfigKind::Bool,
-                _ => ConfigKind::Str,
+                Value::String(_) => config::ConfigKind::Str,
+                Value::Integer(_) => config::ConfigKind::Int,
+                Value::Float(_) => config::ConfigKind::Float,
+                Value::Boolean(_) => config::ConfigKind::Bool,
+                _ => config::ConfigKind::Str,
             };
             let value = toml_value_to_string(value).unwrap_or_else(|| value.to_string());
-            items.push(ConfigItem {
-                key: key.to_string(),
-                value,
-                kind,
-            });
+            if let Some(idx) = index.get(key) {
+                if let Some(item) = items.get_mut(*idx) {
+                    item.value = value;
+                    item.kind = kind;
+                }
+            } else {
+                extras.push(ConfigItem {
+                    key: key.to_string(),
+                    value,
+                    kind,
+                });
+            }
         }
-        items.sort_by(|a, b| a.key.cmp(&b.key));
-        return items;
+        if !extras.is_empty() {
+            extras.sort_by(|a, b| a.key.cmp(&b.key));
+            items.extend(extras);
+        }
     }
 
-    default_config_items()
+    items
 }
 
 fn default_config_items() -> Vec<ConfigItem> {
-    let mut items = Vec::new();
-    let mut push_item = |key: &str, kind: ConfigKind, default: String| {
-        items.push(ConfigItem {
-            key: key.to_string(),
-            value: default,
-            kind,
-        });
-    };
-
-    push_item("url", ConfigKind::Str, config::DEFAULT_URL.to_string());
-    push_item(
-        "refresh_secs",
-        ConfigKind::Int,
-        config::DEFAULT_REFRESH_SECS.to_string(),
-    );
-    push_item("insecure", ConfigKind::Bool, "false".to_string());
-    push_item(
-        "allow_http",
-        ConfigKind::Bool,
-        config::DEFAULT_ALLOW_HTTP.to_string(),
-    );
-    push_item("allow_insecure", ConfigKind::Bool, "false".to_string());
-    push_item(
-        "stale_secs",
-        ConfigKind::Int,
-        config::DEFAULT_STALE_SECS.to_string(),
-    );
-    push_item(
-        "low_nic",
-        ConfigKind::Int,
-        config::DEFAULT_LOW_NIC.to_string(),
-    );
-    push_item(
-        "low_nac",
-        ConfigKind::Int,
-        config::DEFAULT_LOW_NAC.to_string(),
-    );
-    push_item(
-        "trail_len",
-        ConfigKind::Int,
-        config::DEFAULT_TRAIL_LEN.to_string(),
-    );
-    push_item(
-        "hide_stale",
-        ConfigKind::Bool,
-        config::DEFAULT_HIDE_STALE.to_string(),
-    );
-    push_item(
-        "favorites_file",
-        ConfigKind::Str,
-        config::DEFAULT_FAVORITES_FILE.to_string(),
-    );
-    push_item("api_key", ConfigKind::Str, "".to_string());
-    push_item(
-        "api_key_header",
-        ConfigKind::Str,
-        config::DEFAULT_API_KEY_HEADER.to_string(),
-    );
-    push_item("log_enabled", ConfigKind::Bool, "false".to_string());
-    push_item("log_level", ConfigKind::Str, "info".to_string());
-    push_item("log_file", ConfigKind::Str, "adsb-tui.log".to_string());
-    push_item(
-        "watchlist_enabled",
-        ConfigKind::Bool,
-        config::DEFAULT_WATCHLIST_ENABLED.to_string(),
-    );
-    push_item(
-        "watchlist_file",
-        ConfigKind::Str,
-        config::DEFAULT_WATCHLIST_FILE.to_string(),
-    );
-    push_item("filter", ConfigKind::Str, "".to_string());
-    push_item("layout", ConfigKind::Str, "full".to_string());
-    push_item("theme", ConfigKind::Str, "default".to_string());
-    push_item(
-        "radar_range_nm",
-        ConfigKind::Float,
-        config::DEFAULT_RADAR_RANGE_NM.to_string(),
-    );
-    push_item(
-        "radar_aspect",
-        ConfigKind::Float,
-        config::DEFAULT_RADAR_ASPECT.to_string(),
-    );
-    push_item(
-        "radar_renderer",
-        ConfigKind::Str,
-        config::DEFAULT_RADAR_RENDERER.to_string(),
-    );
-    push_item(
-        "radar_labels",
-        ConfigKind::Bool,
-        config::DEFAULT_RADAR_LABELS.to_string(),
-    );
-    push_item(
-        "radar_blip",
-        ConfigKind::Str,
-        config::DEFAULT_RADAR_BLIP.to_string(),
-    );
-    push_item("site_lat", ConfigKind::Float, "".to_string());
-    push_item("site_lon", ConfigKind::Float, "".to_string());
-    push_item("site_alt_m", ConfigKind::Float, "".to_string());
-    push_item(
-        "demo_mode",
-        ConfigKind::Bool,
-        config::DEFAULT_DEMO_MODE.to_string(),
-    );
-    push_item("route_enabled", ConfigKind::Bool, "true".to_string());
-    push_item(
-        "route_base",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_BASE.to_string(),
-    );
-    push_item(
-        "route_mode",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_MODE.to_string(),
-    );
-    push_item(
-        "route_path",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_PATH.to_string(),
-    );
-    push_item(
-        "route_ttl_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_TTL_SECS.to_string(),
-    );
-    push_item(
-        "route_refresh_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_REFRESH_SECS.to_string(),
-    );
-    push_item(
-        "route_batch",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_BATCH.to_string(),
-    );
-    push_item(
-        "route_timeout_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_TIMEOUT_SECS.to_string(),
-    );
-    push_item(
-        "ui_fps",
-        ConfigKind::Int,
-        config::DEFAULT_UI_FPS.to_string(),
-    );
-    push_item(
-        "smooth_mode",
-        ConfigKind::Bool,
-        config::DEFAULT_SMOOTH_MODE.to_string(),
-    );
-    push_item(
-        "smooth_merge",
-        ConfigKind::Bool,
-        config::DEFAULT_SMOOTH_MERGE.to_string(),
-    );
-    push_item(
-        "rate_window_ms",
-        ConfigKind::Int,
-        config::DEFAULT_RATE_WINDOW_MS.to_string(),
-    );
-    push_item(
-        "rate_min_secs",
-        ConfigKind::Float,
-        config::DEFAULT_RATE_MIN_SECS.to_string(),
-    );
-    push_item(
-        "notify_radius_mi",
-        ConfigKind::Float,
-        config::DEFAULT_NOTIFY_RADIUS_MI.to_string(),
-    );
-    push_item(
-        "overpass_mi",
-        ConfigKind::Float,
-        config::DEFAULT_OVERPASS_MI.to_string(),
-    );
-    push_item(
-        "notify_cooldown_secs",
-        ConfigKind::Int,
-        config::DEFAULT_NOTIFY_COOLDOWN_SECS.to_string(),
-    );
-    push_item(
-        "altitude_trend_arrows",
-        ConfigKind::Bool,
-        config::DEFAULT_ALTITUDE_TREND_ARROWS.to_string(),
-    );
-    push_item(
-        "track_arrows",
-        ConfigKind::Bool,
-        config::DEFAULT_TRACK_ARROWS.to_string(),
-    );
-    push_item(
-        "stats_metric_1",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_1.to_string(),
-    );
-    push_item(
-        "stats_metric_2",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_2.to_string(),
-    );
-    push_item(
-        "stats_metric_3",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_3.to_string(),
-    );
-    push_item(
-        "column_cache",
-        ConfigKind::Bool,
-        config::DEFAULT_COLUMN_CACHE.to_string(),
-    );
-    push_item(
-        "flags_enabled",
-        ConfigKind::Bool,
-        config::DEFAULT_FLAGS_ENABLED.to_string(),
-    );
-    push_item(
-        "flag_style",
-        ConfigKind::Str,
-        config::DEFAULT_FLAG_STYLE.to_string(),
-    );
-
-    items
+    config::config_specs()
+        .iter()
+        .map(|spec| ConfigItem {
+            key: spec.key.to_string(),
+            value: spec.default_string(),
+            kind: spec.kind,
+        })
+        .collect()
 }
 
 fn toml_value_to_string(value: &Value) -> Option<String> {
@@ -2844,14 +2768,14 @@ fn toml_value_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, String> {
+fn parse_config_value(kind: config::ConfigKind, raw: &str) -> Result<Option<Value>, String> {
     let text = raw.trim();
     if text.is_empty() {
         return Ok(None);
     }
     match kind {
-        ConfigKind::Str => Ok(Some(Value::String(text.to_string()))),
-        ConfigKind::Bool => {
+        config::ConfigKind::Str => Ok(Some(Value::String(text.to_string()))),
+        config::ConfigKind::Bool => {
             let lowered = text.to_ascii_lowercase();
             if matches!(lowered.as_str(), "1" | "true" | "yes" | "on") {
                 Ok(Some(Value::Boolean(true)))
@@ -2861,11 +2785,11 @@ fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, Stri
                 Err(format!("invalid bool: {text}"))
             }
         }
-        ConfigKind::Int => match text.parse::<i64>() {
+        config::ConfigKind::Int => match text.parse::<i64>() {
             Ok(value) => Ok(Some(Value::Integer(value))),
             Err(_) => Err(format!("invalid int for {}", text)),
         },
-        ConfigKind::Float => match text.parse::<f64>() {
+        config::ConfigKind::Float => match text.parse::<f64>() {
             Ok(value) => Ok(Some(Value::Float(value))),
             Err(_) => Err(format!("invalid float for {}", text)),
         },
@@ -2904,9 +2828,11 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches,
-        AircraftRole, App, ConfigKind, RadarBlip, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
+        compare_f64, compare_i64, distance_mi, load_config_items, parse_config_value,
+        watch_entry_matches, AircraftRole, App, RadarBlip, RadarRenderer, RouteInfo, TrendDir,
+        WatchEntry,
     };
+    use crate::config::ConfigKind;
     use crate::model::Aircraft;
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -3184,6 +3110,39 @@ mod tests {
             .is_some());
         assert!(parse_config_value(ConfigKind::Str, " ").unwrap().is_none());
         assert!(parse_config_value(ConfigKind::Bool, "maybe").is_err());
+    }
+
+    fn write_temp_config(contents: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        path.push(format!("adsb-tui-test-{nanos}.toml"));
+        std::fs::write(&path, contents).expect("write temp config");
+        path
+    }
+
+    #[test]
+    fn load_config_items_merges_defaults() {
+        let path =
+            write_temp_config("refresh_secs = 5\nrole_enabled = false\nunknown_key = \"abc\"\n");
+
+        let items = load_config_items(&path);
+        let refresh = items.iter().find(|item| item.key == "refresh_secs");
+        let role = items.iter().find(|item| item.key == "role_enabled");
+        let url = items.iter().find(|item| item.key == "url");
+        let extra = items.iter().find(|item| item.key == "unknown_key");
+
+        assert!(refresh.is_some());
+        assert_eq!(refresh.unwrap().value, "5");
+        assert!(role.is_some());
+        assert_eq!(role.unwrap().value, "false");
+        assert!(url.is_some());
+        assert!(extra.is_some());
+        assert_eq!(extra.unwrap().value, "abc");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
