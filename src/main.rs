@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod export;
 mod logging;
+mod lookup;
 mod model;
 mod net;
 mod radar;
@@ -19,11 +20,12 @@ use std::time::Duration;
 use app::{App, FlagStyle, LayoutMode, RadarBlip, RadarRenderer, SiteLocation, ThemeMode};
 use config::parse_args;
 use logging::init as init_logging;
+use lookup::spawn_lookup_fetcher;
 use net::spawn_fetcher;
 use routes::spawn_route_fetcher;
-use runtime::{init_terminal, restore_terminal, run_app, RouteChannels};
+use runtime::{init_terminal, restore_terminal, run_app, LookupChannels, RouteChannels};
 use std::path::PathBuf;
-use storage::{load_favorites, load_watchlist};
+use storage::{ensure_watchlist_file, load_favorites, load_watchlist};
 use tracing::{debug, info, warn};
 
 fn main() -> Result<()> {
@@ -45,11 +47,11 @@ fn main() -> Result<()> {
     };
 
     spawn_fetcher(
-        config.url.clone(),
+        config.urls.clone(),
         config.refresh,
         config.insecure,
-        api_key,
-        api_key_header,
+        api_key.clone(),
+        api_key_header.clone(),
         tx,
     );
 
@@ -78,15 +80,19 @@ fn main() -> Result<()> {
         Some(PathBuf::from(config.watchlist_file))
     };
     let mut watchlist = Vec::new();
-    if config.watchlist_enabled {
-        if let Some(path) = watchlist_path.as_ref() {
-            if let Ok(entries) = load_watchlist(path) {
-                watchlist = entries;
-            } else {
-                warn!("failed to load watchlist from {}", path.display());
+    if let Some(path) = watchlist_path.as_ref() {
+        if let Ok(created) = ensure_watchlist_file(path) {
+            if created {
+                info!("watchlist template created at {}", path.display());
             }
         }
+        if let Ok(entries) = load_watchlist(path) {
+            watchlist = entries;
+        } else if config.watchlist_enabled {
+            warn!("failed to load watchlist from {}", path.display());
+        }
     }
+    let watchlist_enabled = config.watchlist_enabled || !watchlist.is_empty();
 
     let layout_mode = LayoutMode::from_str(&config.layout);
     let theme_mode = ThemeMode::from_str(&config.theme);
@@ -123,6 +129,23 @@ fn main() -> Result<()> {
         None
     };
 
+    let lookup_channels = {
+        let (lookup_req_tx, lookup_req_rx) = mpsc::channel();
+        let (lookup_res_tx, lookup_res_rx) = mpsc::channel();
+        spawn_lookup_fetcher(
+            config.route_base.clone(),
+            config.insecure,
+            api_key.clone(),
+            api_key_header.clone(),
+            lookup_req_rx,
+            lookup_res_tx,
+        );
+        LookupChannels {
+            req_tx: lookup_req_tx,
+            res_rx: lookup_res_rx,
+        }
+    };
+
     let res = run_app(
         &mut terminal,
         App::new(
@@ -136,6 +159,8 @@ fn main() -> Result<()> {
             config.filter,
             layout_mode,
             theme_mode,
+            config.role_enabled,
+            config.role_highlight,
             config.column_cache,
             Duration::from_millis(400),
             config.config_path.clone(),
@@ -168,12 +193,13 @@ fn main() -> Result<()> {
             config.stats_metric_1.clone(),
             config.stats_metric_2.clone(),
             config.stats_metric_3.clone(),
-            config.watchlist_enabled,
+            watchlist_enabled,
             watchlist_path.clone(),
             watchlist,
         ),
         rx,
         route_channels,
+        Some(lookup_channels),
     );
     restore_terminal(&mut terminal)?;
 

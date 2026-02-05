@@ -1,0 +1,10 @@
+[workspace]
+changelog_update = true
+release_always = false
+git_release_enable = true
+publish = false
+semver_check = false
+
+[changelog]
+# Use Keep a Changelog layout with newest first
+sort_commits = "newest"

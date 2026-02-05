@@ -7,7 +7,8 @@ use ratatui::Frame;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::app::{
-    App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode, TrendDir,
+    AircraftRole, App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode,
+    TrendDir,
 };
 use crate::model::seen_seconds;
 use crate::radar::{self, RadarSettings, RadarTheme};
@@ -68,6 +69,10 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
 
     if app.input_mode == InputMode::Watchlist {
         render_watchlist_menu(f, size, app);
+    }
+
+    if app.input_mode == InputMode::Lookup {
+        render_lookup_menu(f, size, app);
     }
 }
 
@@ -211,6 +216,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
         Span::styled("[C]Config ", Style::default().fg(theme.dim)),
         Span::styled("[W]Watch ", Style::default().fg(theme.dim)),
+        Span::styled("[g]Lookup ", Style::default().fg(theme.dim)),
         Span::styled("[L]Legend ", Style::default().fg(theme.dim)),
         Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
@@ -589,6 +595,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
             }
             _ => false,
         };
+        let role = app.classify_aircraft(ac);
 
         let mut style = if i % 2 == 0 {
             Style::default().bg(theme.row_even_bg)
@@ -598,6 +605,22 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
 
         if overpass {
             style = style.fg(Color::Green).add_modifier(Modifier::BOLD);
+        } else if app.role_enabled && app.role_highlight && matches!(role, AircraftRole::Military) {
+            // Pulse colors (no terminal blink dependency) to highlight MIL rows.
+            let pulse = phase_ms(350);
+            let fg = if pulse { theme.accent } else { theme.danger };
+            let bg = if pulse {
+                theme.header_bg
+            } else {
+                theme.panel_bg
+            };
+            style = style.fg(fg).bg(bg).add_modifier(Modifier::BOLD);
+        } else if app.role_enabled && app.role_highlight && matches!(role, AircraftRole::Government)
+        {
+            style = style
+                .fg(theme.warn)
+                .bg(theme.header_bg)
+                .add_modifier(Modifier::BOLD);
         } else if seen.map(|s| s <= 1.0).unwrap_or(false) {
             style = if fresh_pulse {
                 style
@@ -680,6 +703,34 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
         let desc = ac.desc.as_deref().unwrap_or("--");
         let owner = ac.own_op.as_deref().unwrap_or("--");
         let year = ac.year.as_deref().unwrap_or("--");
+        let role_line = if app.role_enabled {
+            let role = app.classify_aircraft(ac);
+            let (role_text, role_style) = match role {
+                AircraftRole::Military => (
+                    "MILITARY",
+                    Style::default()
+                        .fg(theme.warn)
+                        .bg(theme.header_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                AircraftRole::Government => (
+                    "GOVERNMENT",
+                    Style::default()
+                        .fg(theme.accent)
+                        .bg(theme.header_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                AircraftRole::Commercial => ("COMMERCIAL", Style::default().fg(theme.dim)),
+                AircraftRole::Unknown => ("UNKNOWN", Style::default().fg(theme.dim)),
+            };
+
+            Some(Line::from(vec![
+                Span::styled("ROLE     ", Style::default().fg(theme.dim)),
+                Span::styled(role_text, role_style),
+            ]))
+        } else {
+            None
+        };
         let alt_baro = fmt_i64(ac.alt_baro, 0);
         let alt_geom = fmt_i64(ac.alt_geom, 0);
         let gs = fmt_f64(ac.gs, 0, 0);
@@ -740,7 +791,7 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             _ => ("--".to_string(), "--".to_string()),
         };
 
-        vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled("CALLSIGN ", Style::default().fg(theme.dim)),
                 Span::styled(
@@ -838,7 +889,13 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
                 Span::styled("SIL/RSSI ", Style::default().fg(theme.dim)),
                 Span::raw(format!("{sil} / {rssi} dB")),
             ]),
-        ]
+        ];
+
+        if let Some(role_line) = role_line {
+            lines.insert(4, role_line);
+        }
+
+        lines
     } else {
         vec![Line::from("No aircraft selected.")]
     };
@@ -982,7 +1039,9 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  b          Toggle radar labels"),
         Line::from("  t          Toggle theme"),
         Line::from("  m          Columns menu"),
+        Line::from("  g          Lookup modal"),
         Line::from("  w          Watchlist"),
+        Line::from("  a          Add to watchlist (from list)"),
         Line::from(""),
         Line::from(Span::styled(
             "Filter & Favorites",
@@ -1208,22 +1267,26 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(Clear, popup);
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(Span::styled(
-        "WATCHLIST",
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
     let path_text = app
         .watchlist_path()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "--".to_string());
-    lines.push(Line::from(Span::styled(
-        format!("FILE {path_text}"),
-        Style::default().fg(theme.dim),
-    )));
-    lines.push(Line::from(""));
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "WATCHLIST",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            format!("FILE  {path_text}"),
+            Style::default().fg(theme.dim),
+        )),
+        Line::from(Span::styled(
+            "STATE  N  LABEL               MATCH                        MODE",
+            Style::default().fg(theme.dim),
+        )),
+    ];
 
     let reserved = 4;
     let items_height = popup.height.saturating_sub(reserved).max(1) as usize;
@@ -1238,8 +1301,17 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
     let end = (start + items_height).min(total_items);
 
     if total_items == 0 {
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "No watchlist entries.",
+            "No watchlist entries yet.",
+            Style::default().fg(theme.dim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Add from list: select aircraft, press 'a'.",
+            Style::default().fg(theme.dim),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Match types: hex | callsign | reg | type | owner | category | route",
             Style::default().fg(theme.dim),
         )));
     } else {
@@ -1255,7 +1327,7 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
             let mode = entry.match_mode();
             let match_text = format!("{}={}", entry.match_type, entry.value);
             let text = format!(
-                "{enabled} {notify}  {:<18}  {}  ({})",
+                "{enabled:<3}  {notify:^1}  {:<18}  {:<28}  {:<7}",
                 truncate(label, 18),
                 truncate(&match_text, 28),
                 mode
@@ -1276,8 +1348,9 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
     }
 
     lines.push(Line::from(""));
+    lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "e toggle enabled • n toggle notify • d delete • s save",
+        "a add from list  •  e enable  •  n notify  •  d delete  •  s save",
         Style::default().fg(theme.dim),
     )));
     lines.push(Line::from(Span::styled(
@@ -1294,6 +1367,124 @@ fn render_watchlist_menu(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title("WATCHLIST");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_lookup_menu(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let popup = centered_rect(70, 16, area);
+
+    f.render_widget(Clear, popup);
+
+    let label = Style::default().fg(theme.dim).add_modifier(Modifier::BOLD);
+    let supports = "hex | callsign | reg | type | squawk | point <lat lon nm> | mil | ladd | pia";
+
+    let query = format!("{}_", app.lookup_input);
+    let status_text = app.lookup_status.as_deref().unwrap_or("Enter to fetch");
+    let status_text = if app.lookup_busy {
+        let spinner = ["|", "/", "-", "\\"][phase_index(160, 4)];
+        format!("[{spinner}] {status_text}")
+    } else {
+        status_text.to_string()
+    };
+    let status_style = if status_text.starts_with("Error") {
+        Style::default().fg(theme.danger)
+    } else if app.lookup_busy {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.dim)
+    };
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "LOOKUP",
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(vec![
+            Span::styled("SUPPORTS ", label),
+            Span::styled(supports, Style::default().fg(theme.dim)),
+        ]),
+        Line::from(vec![
+            Span::styled("QUERY    ", label),
+            Span::styled(
+                query,
+                Style::default().fg(theme.highlight_fg).bg(theme.header_bg),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("STATUS   ", label),
+            Span::styled(status_text, status_style),
+        ]),
+        Line::from(vec![
+            Span::styled("EXAMPLES ", label),
+            Span::styled(
+                "hex abc123 | reg n123ab | point 37.6 -122.3 50",
+                Style::default().fg(theme.dim),
+            ),
+        ]),
+    ];
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "RESULTS",
+        Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
+    )));
+    match &app.lookup_results {
+        Some(results) if results.is_empty() => {
+            lines.push(Line::from(Span::styled(
+                "No results",
+                Style::default().fg(theme.dim),
+            )));
+        }
+        Some(results) => {
+            lines.push(Line::from(Span::styled(
+                "HEX    CALLSIGN  TYPE    ALT",
+                Style::default().fg(theme.dim),
+            )));
+            for ac in results.iter().take(6) {
+                let hex = ac.hex.as_deref().unwrap_or("--");
+                let cs = fit_str(ac.flight.as_deref(), 8);
+                let t = ac.t.as_deref().unwrap_or("--");
+                let alt = match ac.alt_baro {
+                    Some(v) => format!("{:>5} ft", v),
+                    None => "--".to_string(),
+                };
+                lines.push(Line::from(format!("{hex:<6}  {cs:<8}  {t:<6}  {alt}")));
+            }
+            let extra = results.len().saturating_sub(6);
+            if extra > 0 {
+                lines.push(Line::from(Span::styled(
+                    format!("... and {extra} more"),
+                    Style::default().fg(theme.dim),
+                )));
+            }
+        }
+        None => {
+            lines.push(Line::from(Span::styled(
+                "Waiting for lookup...",
+                Style::default().fg(theme.dim),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Enter fetch | Esc close | Ctrl+U clear",
+        Style::default().fg(theme.dim),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title("LOOKUP");
     let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: true })

@@ -11,6 +11,7 @@ use toml_edit::DocumentMut;
 use tracing::{debug, info, trace, warn};
 
 use crate::config;
+use crate::lookup::{LookupKind, LookupRequest};
 use crate::model::{seen_seconds, Aircraft, ApiResponse};
 use crate::storage;
 use crate::watchlist::WatchEntry;
@@ -49,6 +50,7 @@ pub enum InputMode {
     Config,
     Legend,
     Watchlist,
+    Lookup,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -186,6 +188,14 @@ pub enum TrendDir {
     Unknown,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AircraftRole {
+    Military,
+    Government,
+    Commercial,
+    Unknown,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Trend {
     pub alt: TrendDir,
@@ -241,19 +251,11 @@ pub struct Notification {
     pub at: SystemTime,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum ConfigKind {
-    Str,
-    Bool,
-    Int,
-    Float,
-}
-
 #[derive(Clone, Debug)]
 pub struct ConfigItem {
     pub key: String,
     pub value: String,
-    pub kind: ConfigKind,
+    pub kind: config::ConfigKind,
 }
 
 #[derive(Clone, Debug)]
@@ -315,6 +317,8 @@ pub struct App {
     pub(crate) input_mode: InputMode,
     pub(crate) layout_mode: LayoutMode,
     pub(crate) theme_mode: ThemeMode,
+    pub(crate) role_enabled: bool,
+    pub(crate) role_highlight: bool,
     pub(crate) column_cache_enabled: bool,
     pub(crate) column_cache_ttl: Duration,
     column_width_cache: Option<ColumnWidthCache>,
@@ -383,6 +387,11 @@ pub struct App {
     pub(crate) trail_points: HashMap<String, Vec<TrailPoint>>,
     pub(crate) last_export: Option<(String, SystemTime)>,
     pub(crate) route_error: Option<(String, SystemTime)>,
+    // Lookup modal state
+    pub(crate) lookup_input: String,
+    pub(crate) lookup_status: Option<String>,
+    pub(crate) lookup_results: Option<Vec<Aircraft>>,
+    pub(crate) lookup_busy: bool,
 }
 
 impl App {
@@ -398,6 +407,8 @@ impl App {
         filter: String,
         layout_mode: LayoutMode,
         theme_mode: ThemeMode,
+        role_enabled: bool,
+        role_highlight: bool,
         column_cache_enabled: bool,
         column_cache_ttl: Duration,
         config_path: PathBuf,
@@ -468,6 +479,8 @@ impl App {
             input_mode: InputMode::Normal,
             layout_mode,
             theme_mode,
+            role_enabled,
+            role_highlight,
             column_cache_enabled,
             column_cache_ttl: if column_cache_ttl.is_zero() {
                 Duration::from_millis(400)
@@ -556,6 +569,10 @@ impl App {
             trail_points: HashMap::new(),
             last_export: None,
             route_error: None,
+            lookup_input: String::new(),
+            lookup_status: None,
+            lookup_results: None,
+            lookup_busy: false,
         }
     }
 
@@ -729,6 +746,60 @@ impl App {
                 });
             }
         }
+    }
+
+    pub fn add_watchlist_from_selected(&mut self, indices: &[usize]) -> bool {
+        if !self.watchlist_enabled {
+            self.watchlist_enabled = true;
+        }
+        if let Some(path) = self.watchlist_path.as_ref() {
+            if let Ok(created) = storage::ensure_watchlist_file(path) {
+                if created {
+                    self.notifications.push(Notification {
+                        message: format!("WATCHLIST template created {}", path.display()),
+                        at: SystemTime::now(),
+                    });
+                }
+            }
+        }
+        let Some(selected) = self.table_state.selected() else {
+            return false;
+        };
+        let Some(idx) = indices.get(selected) else {
+            return false;
+        };
+        let Some(ac) = self.data.aircraft.get(*idx) else {
+            return false;
+        };
+        let Some(entry) = make_watchlist_entry(ac) else {
+            return false;
+        };
+        let entry_key = watchlist_entry_key(&entry);
+        if self
+            .watchlist
+            .iter()
+            .any(|existing| watchlist_entry_key(existing) == entry_key)
+        {
+            self.notifications.push(Notification {
+                message: "WATCHLIST already exists".to_string(),
+                at: SystemTime::now(),
+            });
+            return false;
+        }
+        self.watchlist.push(entry.clone());
+        self.watchlist_cursor = self.watchlist.len().saturating_sub(1);
+        self.save_watchlist();
+        let entry_id = entry.entry_id();
+        let label = entry
+            .label
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(entry_id.as_str());
+        self.notifications.push(Notification {
+            message: format!("WATCHLIST added {label}"),
+            at: SystemTime::now(),
+        });
+        true
     }
 
     pub fn toggle_watchlist_enabled_selected(&mut self) -> bool {
@@ -1337,6 +1408,14 @@ impl App {
         self.avg_aircraft_rate
     }
 
+    pub fn classify_aircraft(&self, ac: &Aircraft) -> AircraftRole {
+        if !self.role_enabled {
+            AircraftRole::Unknown
+        } else {
+            classify_aircraft(ac)
+        }
+    }
+
     pub fn route_refresh_due(&mut self, now: SystemTime) -> bool {
         if let Some(until) = self.route_backoff_until {
             if now.duration_since(until).is_err() {
@@ -1394,8 +1473,9 @@ impl App {
             return Vec::new();
         }
         let mut requests = Vec::new();
+        let batch_limit = self.route_batch.min(10);
         for idx in indices {
-            if requests.len() >= self.route_batch {
+            if requests.len() >= batch_limit {
                 break;
             }
             let ac = &self.data.aircraft[*idx];
@@ -1451,7 +1531,9 @@ impl App {
             return;
         }
         self.route_backoff_attempts = self.route_backoff_attempts.saturating_add(1);
-        let backoff = route_backoff_duration(self.route_backoff_attempts);
+        let retry_after = parse_retry_after_hint(message).unwrap_or(0);
+        let backoff = route_backoff_duration(self.route_backoff_attempts)
+            .max(Duration::from_secs(retry_after));
         self.route_backoff_until = Some(now + backoff);
         debug!(
             "route backoff {}s (attempt {}) due to {}",
@@ -1490,6 +1572,67 @@ impl App {
 
     pub fn backspace_filter(&mut self) {
         self.filter_edit.pop();
+    }
+
+    // Lookup modal helpers
+    pub fn open_lookup(&mut self) {
+        self.lookup_input.clear();
+        self.lookup_results = None;
+        self.lookup_status =
+            Some("Enter: hex/callsign/reg/type/squawk/point/mil/ladd/pia".to_string());
+        self.lookup_busy = false;
+        self.input_mode = InputMode::Lookup;
+        debug!("lookup modal opened");
+    }
+
+    pub fn cancel_lookup(&mut self) {
+        self.lookup_input.clear();
+        self.lookup_busy = false;
+        self.input_mode = InputMode::Normal;
+        debug!("lookup modal closed");
+    }
+
+    pub fn push_lookup_char(&mut self, ch: char) {
+        self.lookup_input.push(ch);
+    }
+
+    pub fn backspace_lookup(&mut self) {
+        self.lookup_input.pop();
+    }
+
+    pub fn prepare_lookup_request(&mut self) -> Option<LookupRequest> {
+        if self.lookup_busy {
+            self.lookup_status = Some("Busy...".to_string());
+            return None;
+        }
+        let trimmed = self.lookup_input.trim();
+        if trimmed.is_empty() {
+            self.lookup_status = Some("Enter a query".to_string());
+            return None;
+        }
+        match parse_lookup_input(trimmed) {
+            Some(kind) => {
+                self.lookup_busy = true;
+                self.lookup_status = Some("Fetching...".to_string());
+                Some(LookupRequest { kind })
+            }
+            None => {
+                self.lookup_status = Some("Unrecognized query".to_string());
+                None
+            }
+        }
+    }
+
+    pub fn apply_lookup_result(&mut self, data: ApiResponse) {
+        let count = data.aircraft.len();
+        self.lookup_results = Some(data.aircraft);
+        self.lookup_status = Some(format!("{} result(s)", count));
+        self.lookup_busy = false;
+    }
+
+    pub fn apply_lookup_error(&mut self, err: String) {
+        self.lookup_status = Some(format!("Error: {err}"));
+        self.lookup_busy = false;
     }
 
     pub fn trend_for(&self, ac: &Aircraft) -> Trend {
@@ -1987,6 +2130,135 @@ fn is_rate_limited_message(message: &str) -> bool {
         || msg.contains("rate limit")
 }
 
+fn classify_aircraft(ac: &Aircraft) -> AircraftRole {
+    let callsign = ac
+        .flight
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
+    let owner = ac.own_op.as_deref().unwrap_or("").to_ascii_lowercase();
+    let ac_type = ac.t.as_deref().unwrap_or("").to_ascii_uppercase();
+    let desc = ac.desc.as_deref().unwrap_or("").to_ascii_lowercase();
+    let category = ac.category.as_deref().unwrap_or("").to_ascii_lowercase();
+
+    if matches_prefix(&callsign, &military_callsign_prefixes()) {
+        return AircraftRole::Military;
+    }
+
+    if matches_prefix(&callsign, &government_callsign_prefixes()) {
+        return AircraftRole::Government;
+    }
+
+    if contains_any(&owner, &military_owner_keywords())
+        || contains_any(&desc, &military_owner_keywords())
+        || likely_military_type(&ac_type)
+        || category.contains("mil")
+    {
+        return AircraftRole::Military;
+    }
+
+    if contains_any(&owner, &government_owner_keywords())
+        || contains_any(&desc, &government_owner_keywords())
+        || matches_prefix(&callsign, &government_callsign_prefixes())
+    {
+        return AircraftRole::Government;
+    }
+
+    AircraftRole::Commercial
+}
+
+fn matches_prefix(value: &str, prefixes: &[&str]) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    prefixes
+        .iter()
+        .any(|p| value.starts_with(p) && value.len() >= p.len())
+}
+
+fn contains_any(value: &str, needles: &[&str]) -> bool {
+    let lower = value.to_ascii_lowercase();
+    needles.iter().any(|n| lower.contains(n))
+}
+
+fn likely_military_type(ac_type: &str) -> bool {
+    let prefixes = [
+        "C17", "C-17", "C130", "C-130", "K35", "KC10", "KC-10", "KC46", "E3", "E-3", "E6", "E-6",
+        "P8", "P-8", "P3", "P-3", "B52", "B-52", "F1", "F2", "F3", "F4", "F5", "F6", "F14", "F15",
+        "F16", "F18", "F22", "F35",
+    ];
+    let upper = ac_type.to_ascii_uppercase();
+    prefixes.iter().any(|p| upper.starts_with(p))
+}
+
+fn military_callsign_prefixes() -> Vec<&'static str> {
+    vec![
+        "RCH", "MC", "MAF", "NAF", "BAF", "GAF", "LAGR", "TEXAN", "PAT", "SAM", "SPAR", "ASF",
+        "CFC", "CAF", "HK", "VV", "VM", "AF", "SEN", "CNV", "JENA", "KING",
+    ]
+}
+
+fn government_callsign_prefixes() -> Vec<&'static str> {
+    vec![
+        "NATION", "GOV", "GVT", "POL", "RIDER", "EAG", "EAGLE", "COAST", "CST",
+    ]
+}
+
+fn military_owner_keywords() -> Vec<&'static str> {
+    vec![
+        "air force",
+        "navy",
+        "marine",
+        "marines",
+        "army",
+        "usaf",
+        "usn",
+        "usmc",
+        "uscg",
+        "raf",
+        "rcaf",
+        "luftwaffe",
+        "bundeswehr",
+        "aeronautica",
+        "military",
+        "defence",
+        "defense",
+        "armée",
+        "ejército",
+    ]
+}
+
+fn government_owner_keywords() -> Vec<&'static str> {
+    vec![
+        "government",
+        "gov",
+        "border",
+        "customs",
+        "police",
+        "gendarmerie",
+        "coast guard",
+        "homeland",
+        "cbp",
+        "state",
+        "federal",
+        "department",
+        "ministry",
+    ]
+}
+
+fn parse_retry_after_hint(message: &str) -> Option<u64> {
+    message
+        .split(|c: char| [' ', '(', ')'].contains(&c))
+        .find_map(|part| {
+            if let Some(rest) = part.strip_prefix("retry-after=") {
+                rest.trim_end_matches('s').parse::<u64>().ok()
+            } else {
+                None
+            }
+        })
+}
+
 fn route_backoff_duration(attempts: u32) -> Duration {
     if attempts == 0 {
         return Duration::from_secs(0);
@@ -2005,6 +2277,68 @@ fn match_text(needle: &str, haystack: &str, mode: &str) -> bool {
         "contains" => haystack.contains(needle),
         _ => haystack == needle,
     }
+}
+
+fn parse_lookup_input(input: &str) -> Option<LookupKind> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Allow prefix forms like "hex:abc" or tokenized "hex abc".
+    let (head, tail_opt) = if let Some(idx) = trimmed.find(':') {
+        let (h, rest) = trimmed.split_at(idx);
+        (
+            h.trim().to_ascii_lowercase(),
+            Some(rest[1..].trim().to_string()),
+        )
+    } else {
+        let mut parts = trimmed.split_whitespace();
+        let h = parts.next()?.to_ascii_lowercase();
+        let rest = parts.collect::<Vec<_>>().join(" ");
+        (h, if rest.is_empty() { None } else { Some(rest) })
+    };
+
+    match head.as_str() {
+        "hex" => Some(LookupKind::Hex(split_list(tail_opt?))),
+        "callsign" | "call" | "cs" => Some(LookupKind::Callsign(split_list(tail_opt?))),
+        "reg" | "registration" => Some(LookupKind::Reg(split_list(tail_opt?))),
+        "type" => Some(LookupKind::Type(split_list(tail_opt?))),
+        "squawk" | "sqk" => Some(LookupKind::Squawk(split_list(tail_opt?))),
+        "point" => parse_point(tail_opt?),
+        "mil" => Some(LookupKind::Mil),
+        "ladd" => Some(LookupKind::Ladd),
+        "pia" => Some(LookupKind::Pia),
+        // If no prefix, treat free text as callsign lookup.
+        _ => {
+            if let Some(rest) = tail_opt {
+                Some(LookupKind::Callsign(split_list(format!("{head} {rest}"))))
+            } else {
+                Some(LookupKind::Callsign(vec![head]))
+            }
+        }
+    }
+}
+
+fn split_list(text: String) -> Vec<String> {
+    text.split(|c: char| c == ',' || c.is_whitespace())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_point(args: String) -> Option<LookupKind> {
+    let parts: Vec<_> = args
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let lat = parts[0].trim().parse::<f64>().ok()?;
+    let lon = parts[1].trim().parse::<f64>().ok()?;
+    let radius = parts[2].trim().parse::<f64>().ok()?;
+    Some(LookupKind::Point { lat, lon, radius })
 }
 
 fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteInfo>) -> bool {
@@ -2062,6 +2396,87 @@ fn watch_entry_matches(entry: &WatchEntry, ac: &Aircraft, route: Option<&RouteIn
         }
         _ => false,
     }
+}
+
+fn make_watchlist_entry(ac: &Aircraft) -> Option<WatchEntry> {
+    if let Some(callsign) = ac
+        .flight
+        .as_deref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        let label =
+            ac.r.as_deref()
+                .map(|reg| format!("{callsign} {reg}"))
+                .unwrap_or_else(|| callsign.to_string());
+        return Some(WatchEntry {
+            id: None,
+            label: Some(label),
+            match_type: "callsign".to_string(),
+            value: callsign.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(hex) = ac
+        .hex
+        .as_deref()
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+    {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("HEX {hex}")),
+            match_type: "hex".to_string(),
+            value: hex.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(reg) = ac.r.as_deref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("REG {reg}")),
+            match_type: "reg".to_string(),
+            value: reg.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    if let Some(ac_type) = ac.t.as_deref().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        return Some(WatchEntry {
+            id: None,
+            label: Some(format!("TYPE {ac_type}")),
+            match_type: "type".to_string(),
+            value: ac_type.to_string(),
+            enabled: Some(true),
+            notify: Some(true),
+            priority: Some(0),
+            mode: Some("exact".to_string()),
+            color: None,
+        });
+    }
+    None
+}
+
+fn watchlist_entry_key(entry: &WatchEntry) -> String {
+    let match_type = entry.match_type.trim().to_ascii_lowercase();
+    let value = entry.value.trim();
+    let normalized = match match_type.as_str() {
+        "hex" | "icao" | "icao_hex" => normalize_hex(value),
+        "callsign" | "flight" | "cs" => normalize_callsign(value),
+        _ => normalize_text(value),
+    };
+    format!("{match_type}:{normalized}")
 }
 
 fn compare_i64(prev: Option<i64>, current: Option<i64>) -> TrendDir {
@@ -2294,252 +2709,53 @@ fn load_config_items(path: &PathBuf) -> Vec<ConfigItem> {
         .and_then(|content| toml::from_str::<Value>(&content).ok());
     let table = file_value.and_then(|value| value.as_table().cloned());
 
+    let mut items = default_config_items();
     if let Some(map) = table.as_ref() {
-        let mut items = Vec::new();
+        let mut index = HashMap::new();
+        for (idx, item) in items.iter().enumerate() {
+            index.insert(item.key.clone(), idx);
+        }
+        let mut extras = Vec::new();
         for (key, value) in map {
             let kind = match value {
-                Value::String(_) => ConfigKind::Str,
-                Value::Integer(_) => ConfigKind::Int,
-                Value::Float(_) => ConfigKind::Float,
-                Value::Boolean(_) => ConfigKind::Bool,
-                _ => ConfigKind::Str,
+                Value::String(_) => config::ConfigKind::Str,
+                Value::Integer(_) => config::ConfigKind::Int,
+                Value::Float(_) => config::ConfigKind::Float,
+                Value::Boolean(_) => config::ConfigKind::Bool,
+                _ => config::ConfigKind::Str,
             };
             let value = toml_value_to_string(value).unwrap_or_else(|| value.to_string());
-            items.push(ConfigItem {
-                key: key.to_string(),
-                value,
-                kind,
-            });
+            if let Some(idx) = index.get(key) {
+                if let Some(item) = items.get_mut(*idx) {
+                    item.value = value;
+                    item.kind = kind;
+                }
+            } else {
+                extras.push(ConfigItem {
+                    key: key.to_string(),
+                    value,
+                    kind,
+                });
+            }
         }
-        items.sort_by(|a, b| a.key.cmp(&b.key));
-        return items;
+        if !extras.is_empty() {
+            extras.sort_by(|a, b| a.key.cmp(&b.key));
+            items.extend(extras);
+        }
     }
 
-    default_config_items()
+    items
 }
 
 fn default_config_items() -> Vec<ConfigItem> {
-    let mut items = Vec::new();
-    let mut push_item = |key: &str, kind: ConfigKind, default: String| {
-        items.push(ConfigItem {
-            key: key.to_string(),
-            value: default,
-            kind,
-        });
-    };
-
-    push_item("url", ConfigKind::Str, config::DEFAULT_URL.to_string());
-    push_item(
-        "refresh_secs",
-        ConfigKind::Int,
-        config::DEFAULT_REFRESH_SECS.to_string(),
-    );
-    push_item("insecure", ConfigKind::Bool, "false".to_string());
-    push_item("allow_http", ConfigKind::Bool, "false".to_string());
-    push_item("allow_insecure", ConfigKind::Bool, "false".to_string());
-    push_item(
-        "stale_secs",
-        ConfigKind::Int,
-        config::DEFAULT_STALE_SECS.to_string(),
-    );
-    push_item(
-        "low_nic",
-        ConfigKind::Int,
-        config::DEFAULT_LOW_NIC.to_string(),
-    );
-    push_item(
-        "low_nac",
-        ConfigKind::Int,
-        config::DEFAULT_LOW_NAC.to_string(),
-    );
-    push_item(
-        "trail_len",
-        ConfigKind::Int,
-        config::DEFAULT_TRAIL_LEN.to_string(),
-    );
-    push_item(
-        "hide_stale",
-        ConfigKind::Bool,
-        config::DEFAULT_HIDE_STALE.to_string(),
-    );
-    push_item(
-        "favorites_file",
-        ConfigKind::Str,
-        config::DEFAULT_FAVORITES_FILE.to_string(),
-    );
-    push_item("api_key", ConfigKind::Str, "".to_string());
-    push_item(
-        "api_key_header",
-        ConfigKind::Str,
-        config::DEFAULT_API_KEY_HEADER.to_string(),
-    );
-    push_item("log_enabled", ConfigKind::Bool, "false".to_string());
-    push_item("log_level", ConfigKind::Str, "info".to_string());
-    push_item("log_file", ConfigKind::Str, "adsb-tui.log".to_string());
-    push_item(
-        "watchlist_enabled",
-        ConfigKind::Bool,
-        config::DEFAULT_WATCHLIST_ENABLED.to_string(),
-    );
-    push_item(
-        "watchlist_file",
-        ConfigKind::Str,
-        config::DEFAULT_WATCHLIST_FILE.to_string(),
-    );
-    push_item("filter", ConfigKind::Str, "".to_string());
-    push_item("layout", ConfigKind::Str, "full".to_string());
-    push_item("theme", ConfigKind::Str, "default".to_string());
-    push_item(
-        "radar_range_nm",
-        ConfigKind::Float,
-        config::DEFAULT_RADAR_RANGE_NM.to_string(),
-    );
-    push_item(
-        "radar_aspect",
-        ConfigKind::Float,
-        config::DEFAULT_RADAR_ASPECT.to_string(),
-    );
-    push_item(
-        "radar_renderer",
-        ConfigKind::Str,
-        config::DEFAULT_RADAR_RENDERER.to_string(),
-    );
-    push_item(
-        "radar_labels",
-        ConfigKind::Bool,
-        config::DEFAULT_RADAR_LABELS.to_string(),
-    );
-    push_item(
-        "radar_blip",
-        ConfigKind::Str,
-        config::DEFAULT_RADAR_BLIP.to_string(),
-    );
-    push_item("site_lat", ConfigKind::Float, "".to_string());
-    push_item("site_lon", ConfigKind::Float, "".to_string());
-    push_item("site_alt_m", ConfigKind::Float, "".to_string());
-    push_item(
-        "demo_mode",
-        ConfigKind::Bool,
-        config::DEFAULT_DEMO_MODE.to_string(),
-    );
-    push_item("route_enabled", ConfigKind::Bool, "true".to_string());
-    push_item(
-        "route_base",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_BASE.to_string(),
-    );
-    push_item(
-        "route_mode",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_MODE.to_string(),
-    );
-    push_item(
-        "route_path",
-        ConfigKind::Str,
-        config::DEFAULT_ROUTE_PATH.to_string(),
-    );
-    push_item(
-        "route_ttl_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_TTL_SECS.to_string(),
-    );
-    push_item(
-        "route_refresh_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_REFRESH_SECS.to_string(),
-    );
-    push_item(
-        "route_batch",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_BATCH.to_string(),
-    );
-    push_item(
-        "route_timeout_secs",
-        ConfigKind::Int,
-        config::DEFAULT_ROUTE_TIMEOUT_SECS.to_string(),
-    );
-    push_item(
-        "ui_fps",
-        ConfigKind::Int,
-        config::DEFAULT_UI_FPS.to_string(),
-    );
-    push_item(
-        "smooth_mode",
-        ConfigKind::Bool,
-        config::DEFAULT_SMOOTH_MODE.to_string(),
-    );
-    push_item(
-        "smooth_merge",
-        ConfigKind::Bool,
-        config::DEFAULT_SMOOTH_MERGE.to_string(),
-    );
-    push_item(
-        "rate_window_ms",
-        ConfigKind::Int,
-        config::DEFAULT_RATE_WINDOW_MS.to_string(),
-    );
-    push_item(
-        "rate_min_secs",
-        ConfigKind::Float,
-        config::DEFAULT_RATE_MIN_SECS.to_string(),
-    );
-    push_item(
-        "notify_radius_mi",
-        ConfigKind::Float,
-        config::DEFAULT_NOTIFY_RADIUS_MI.to_string(),
-    );
-    push_item(
-        "overpass_mi",
-        ConfigKind::Float,
-        config::DEFAULT_OVERPASS_MI.to_string(),
-    );
-    push_item(
-        "notify_cooldown_secs",
-        ConfigKind::Int,
-        config::DEFAULT_NOTIFY_COOLDOWN_SECS.to_string(),
-    );
-    push_item(
-        "altitude_trend_arrows",
-        ConfigKind::Bool,
-        config::DEFAULT_ALTITUDE_TREND_ARROWS.to_string(),
-    );
-    push_item(
-        "track_arrows",
-        ConfigKind::Bool,
-        config::DEFAULT_TRACK_ARROWS.to_string(),
-    );
-    push_item(
-        "stats_metric_1",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_1.to_string(),
-    );
-    push_item(
-        "stats_metric_2",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_2.to_string(),
-    );
-    push_item(
-        "stats_metric_3",
-        ConfigKind::Str,
-        config::DEFAULT_STATS_METRIC_3.to_string(),
-    );
-    push_item(
-        "column_cache",
-        ConfigKind::Bool,
-        config::DEFAULT_COLUMN_CACHE.to_string(),
-    );
-    push_item(
-        "flags_enabled",
-        ConfigKind::Bool,
-        config::DEFAULT_FLAGS_ENABLED.to_string(),
-    );
-    push_item(
-        "flag_style",
-        ConfigKind::Str,
-        config::DEFAULT_FLAG_STYLE.to_string(),
-    );
-
-    items
+    config::config_specs()
+        .iter()
+        .map(|spec| ConfigItem {
+            key: spec.key.to_string(),
+            value: spec.default_string(),
+            kind: spec.kind,
+        })
+        .collect()
 }
 
 fn toml_value_to_string(value: &Value) -> Option<String> {
@@ -2552,14 +2768,14 @@ fn toml_value_to_string(value: &Value) -> Option<String> {
     }
 }
 
-fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, String> {
+fn parse_config_value(kind: config::ConfigKind, raw: &str) -> Result<Option<Value>, String> {
     let text = raw.trim();
     if text.is_empty() {
         return Ok(None);
     }
     match kind {
-        ConfigKind::Str => Ok(Some(Value::String(text.to_string()))),
-        ConfigKind::Bool => {
+        config::ConfigKind::Str => Ok(Some(Value::String(text.to_string()))),
+        config::ConfigKind::Bool => {
             let lowered = text.to_ascii_lowercase();
             if matches!(lowered.as_str(), "1" | "true" | "yes" | "on") {
                 Ok(Some(Value::Boolean(true)))
@@ -2569,11 +2785,11 @@ fn parse_config_value(kind: ConfigKind, raw: &str) -> Result<Option<Value>, Stri
                 Err(format!("invalid bool: {text}"))
             }
         }
-        ConfigKind::Int => match text.parse::<i64>() {
+        config::ConfigKind::Int => match text.parse::<i64>() {
             Ok(value) => Ok(Some(Value::Integer(value))),
             Err(_) => Err(format!("invalid int for {}", text)),
         },
-        ConfigKind::Float => match text.parse::<f64>() {
+        config::ConfigKind::Float => match text.parse::<f64>() {
             Ok(value) => Ok(Some(Value::Float(value))),
             Err(_) => Err(format!("invalid float for {}", text)),
         },
@@ -2612,9 +2828,11 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_f64, compare_i64, distance_mi, parse_config_value, watch_entry_matches, App,
-        ConfigKind, RadarBlip, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
+        compare_f64, compare_i64, distance_mi, load_config_items, parse_config_value,
+        watch_entry_matches, AircraftRole, App, RadarBlip, RadarRenderer, RouteInfo, TrendDir,
+        WatchEntry,
     };
+    use crate::config::ConfigKind;
     use crate::model::Aircraft;
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -2630,6 +2848,58 @@ mod tests {
             category: Some("A3".to_string()),
             ..Aircraft::default()
         }
+    }
+
+    fn make_app(role_enabled: bool, role_highlight: bool) -> App {
+        App::new(
+            "http://example".to_string(),
+            Duration::from_secs(1),
+            60.0,
+            false,
+            5,
+            8,
+            HashSet::new(),
+            String::new(),
+            crate::app::LayoutMode::Full,
+            crate::app::ThemeMode::Default,
+            role_enabled,
+            role_highlight,
+            true,
+            Duration::from_millis(400),
+            PathBuf::from("adsb-tui.toml"),
+            3,
+            None,
+            None,
+            false,
+            200.0,
+            1.0,
+            crate::app::RadarRenderer::Canvas,
+            false,
+            crate::app::RadarBlip::Dot,
+            false,
+            false,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1,
+            10,
+            true,
+            true,
+            Duration::from_millis(300),
+            0.2,
+            10.0,
+            0.5,
+            Duration::from_secs(60),
+            true,
+            true,
+            true,
+            crate::app::FlagStyle::Emoji,
+            "msg_rate_total".to_string(),
+            "kbps_total".to_string(),
+            "msg_rate_avg".to_string(),
+            true,
+            Some(PathBuf::from("adsb-watchlist.toml")),
+            Vec::new(),
+        )
     }
 
     #[test]
@@ -2751,6 +3021,8 @@ mod tests {
             crate::app::LayoutMode::Full,
             crate::app::ThemeMode::Default,
             true,
+            true,
+            true,
             Duration::from_millis(400),
             PathBuf::from("adsb-tui.toml"),
             3,
@@ -2793,6 +3065,24 @@ mod tests {
     }
 
     #[test]
+    fn role_disabled_masks_classification() {
+        let mut ac = sample_aircraft();
+        ac.flight = Some("RCH123".to_string()); // military prefix
+
+        let app = make_app(false, true);
+        assert!(matches!(app.classify_aircraft(&ac), AircraftRole::Unknown));
+    }
+
+    #[test]
+    fn role_enabled_classifies_military() {
+        let mut ac = sample_aircraft();
+        ac.flight = Some("RCH123".to_string());
+
+        let app = make_app(true, true);
+        assert!(matches!(app.classify_aircraft(&ac), AircraftRole::Military));
+    }
+
+    #[test]
     fn compare_trends() {
         assert_eq!(compare_i64(Some(10), Some(20)), TrendDir::Up);
         assert_eq!(compare_i64(Some(20), Some(10)), TrendDir::Down);
@@ -2820,6 +3110,39 @@ mod tests {
             .is_some());
         assert!(parse_config_value(ConfigKind::Str, " ").unwrap().is_none());
         assert!(parse_config_value(ConfigKind::Bool, "maybe").is_err());
+    }
+
+    fn write_temp_config(contents: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        path.push(format!("adsb-tui-test-{nanos}.toml"));
+        std::fs::write(&path, contents).expect("write temp config");
+        path
+    }
+
+    #[test]
+    fn load_config_items_merges_defaults() {
+        let path =
+            write_temp_config("refresh_secs = 5\nrole_enabled = false\nunknown_key = \"abc\"\n");
+
+        let items = load_config_items(&path);
+        let refresh = items.iter().find(|item| item.key == "refresh_secs");
+        let role = items.iter().find(|item| item.key == "role_enabled");
+        let url = items.iter().find(|item| item.key == "url");
+        let extra = items.iter().find(|item| item.key == "unknown_key");
+
+        assert!(refresh.is_some());
+        assert_eq!(refresh.unwrap().value, "5");
+        assert!(role.is_some());
+        assert_eq!(role.unwrap().value, "false");
+        assert!(url.is_some());
+        assert!(extra.is_some());
+        assert_eq!(extra.unwrap().value, "abc");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

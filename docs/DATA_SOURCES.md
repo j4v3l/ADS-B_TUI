@@ -21,11 +21,13 @@ HTTP sources are allowed by default. Set `allow_http = false` (or omit `allow_ht
 ### 1. RTL-SDR with dump1090
 
 **Hardware:**
+
 - RTL-SDR dongle ($20-30)
 - 1090 MHz antenna
 - Raspberry Pi or computer
 
 **Software Setup:**
+
 ```bash
 # Install dump1090
 sudo apt update
@@ -38,6 +40,7 @@ make
 ```
 
 **Configuration for ADS-B TUI:**
+
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 1
@@ -47,6 +50,7 @@ allow_http = true
 ### 2. readsb (Modern Alternative)
 
 **Installation:**
+
 ```bash
 # Install readsb
 sudo apt install readsb
@@ -56,7 +60,8 @@ sudo nano /etc/default/readsb
 ```
 
 **readsb configuration:**
-```
+
+```text
 RECEIVER_OPTIONS="--device 0 --gain -10"
 DECODER_OPTIONS="--max-range 360"
 NET_OPTIONS="--net --net-heartbeat 60 --net-ro-size 1000 --net-ro-interval 1"
@@ -64,6 +69,7 @@ JSON_OPTIONS="--json-location-accuracy 2"
 ```
 
 **ADS-B TUI config:**
+
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 1
@@ -73,11 +79,13 @@ allow_http = true
 ### 3. ADS-B Exchange Feeder
 
 **Setup:**
+
 1. Sign up at [ADS-B Exchange](https://www.adsbexchange.com/)
 2. Install their feeder software
 3. Configure sharing settings
 
 **ADS-B TUI config:**
+
 ```toml
 url = "https://adsbexchange.com/api/aircraft/json/"
 refresh_secs = 2
@@ -86,9 +94,23 @@ refresh_secs = 2
 
 ## Online Data Sources
 
+### airplanes.live API
+
+**Example point query:**
+
+```toml
+url = "https://api.airplanes.live/v2/point/40.7128/-74.0060/250"
+refresh_secs = 2
+route_base = "https://api.airplanes.live"
+route_mode = "routeset"
+```
+
+Routes default to airplanes.live. To fall back to adsb.lol, set `route_base = "https://api.adsb.lol"`.
+
 ### ADS-B Exchange API
 
 **Free access:**
+
 ```toml
 url = "https://adsbexchange.com/api/aircraft/v2/lat/40.7128/lon/-74.0060/dist/250/"
 refresh_secs = 5
@@ -96,6 +118,7 @@ refresh_secs = 5
 ```
 
 **With API key (higher limits):**
+
 ```toml
 url = "https://adsbexchange.com/api/aircraft/v2/lat/40.7128/lon/-74.0060/dist/250/?apiKey=YOUR_API_KEY"
 refresh_secs = 1
@@ -105,6 +128,7 @@ refresh_secs = 1
 ### OpenSky Network
 
 **Free access:**
+
 ```toml
 url = "https://opensky-network.org/api/states/all"
 refresh_secs = 10
@@ -114,6 +138,7 @@ refresh_secs = 10
 ### FlightAware
 
 **Requires API key:**
+
 ```toml
 url = "https://flightaware.com/live/api/snapshot.rvt"
 refresh_secs = 30
@@ -137,6 +162,7 @@ dump1090 --device 1 --net --net-http-port 8081
 ### Docker Setup
 
 **docker-compose.yml:**
+
 ```yaml
 version: '3.8'
 services:
@@ -151,6 +177,7 @@ services:
 ```
 
 **ADS-B TUI config:**
+
 ```toml
 url = "http://localhost:8080/data/aircraft.json"
 refresh_secs = 1
@@ -207,11 +234,13 @@ ADS-B TUI expects JSON data in the format provided by dump1090:
 ### No Data Received
 
 **Check antenna:**
+
 - Ensure antenna is connected and positioned correctly
 - Try different antenna locations
 - Check for interference
 
 **Check receiver:**
+
 ```bash
 # Test RTL-SDR
 rtl_test -t
@@ -221,6 +250,7 @@ sudo systemctl status dump1090-fa
 ```
 
 **Check network:**
+
 ```bash
 # Test local endpoint
 curl http://localhost:8080/data/aircraft.json
@@ -232,11 +262,13 @@ sudo ufw status
 ### Poor Data Quality
 
 **Signal issues:**
+
 - Improve antenna position/location
 - Use better antenna
 - Check for local interference
 
 **Receiver settings:**
+
 - Adjust gain settings
 - Check sample rate
 - Update firmware
@@ -244,11 +276,13 @@ sudo ufw status
 ### Performance Issues
 
 **High CPU usage:**
+
 - Use readsb instead of dump1090
 - Reduce refresh rate
 - Limit aircraft display range
 
 **Network issues:**
+
 - Check internet connection
 - Reduce refresh rate for online sources
 - Use local caching
