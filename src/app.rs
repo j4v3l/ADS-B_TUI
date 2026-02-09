@@ -1443,11 +1443,19 @@ impl App {
         let mut msg_rate = Vec::with_capacity(self.perf_samples.len());
         let mut flights = Vec::with_capacity(self.perf_samples.len());
         let mut signal = Vec::with_capacity(self.perf_samples.len());
-        let to_rate = |value: Option<f64>| -> u64 { value.unwrap_or(0.0).max(0.0).round() as u64 };
+        let to_rate = |value: Option<f64>| -> u64 {
+            match value {
+                Some(v) if v.is_finite() && v > 0.0 => v.round() as u64,
+                _ => 0,
+            }
+        };
         let to_signal = |value: Option<f64>| -> u64 {
             let min_db = -50.0;
             let max_db = 0.0;
-            let clamped = value.unwrap_or(min_db).clamp(min_db, max_db);
+            let clamped = value
+                .filter(|v| v.is_finite())
+                .unwrap_or(min_db)
+                .clamp(min_db, max_db);
             let norm = (clamped - min_db) / (max_db - min_db);
             (norm * 100.0).round() as u64
         };
