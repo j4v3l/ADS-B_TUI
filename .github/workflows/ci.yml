@@ -127,10 +127,12 @@ jobs:
           path: artifacts
 
       - name: Generate release notes
-        uses: orhun/git-cliff-action@v2
+        uses: taiki-e/install-action@v2
         with:
-          config: .gitcliff.toml
-          args: --tag ${{ github.event.release.tag_name }} -o release-notes.md
+          tool: git-cliff
+
+      - name: Generate release notes
+        run: git cliff --config .gitcliff.toml --tag ${{ github.event.release.tag_name }} -o release-notes.md
 
       - name: Create release archives
         run: |
