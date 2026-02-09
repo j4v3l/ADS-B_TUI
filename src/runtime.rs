@@ -137,6 +137,9 @@ pub fn run_app(
                         KeyCode::Char('R') | KeyCode::Char('r') => {
                             app.set_layout(LayoutMode::Radar);
                         }
+                        KeyCode::Char('P') | KeyCode::Char('p') => {
+                            app.set_layout(LayoutMode::Performance);
+                        }
                         KeyCode::Char('b') | KeyCode::Char('B') => {
                             app.toggle_radar_labels();
                         }

@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod export;
+mod graph;
 mod logging;
 mod lookup;
 mod model;

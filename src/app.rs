@@ -58,6 +58,7 @@ pub enum LayoutMode {
     Full,
     Compact,
     Radar,
+    Performance,
 }
 
 impl LayoutMode {
@@ -66,6 +67,7 @@ impl LayoutMode {
             LayoutMode::Full => LayoutMode::Compact,
             LayoutMode::Compact => LayoutMode::Full,
             LayoutMode::Radar => LayoutMode::Full,
+            LayoutMode::Performance => LayoutMode::Full,
         }
     }
 
@@ -74,6 +76,7 @@ impl LayoutMode {
             LayoutMode::Full => "FULL",
             LayoutMode::Compact => "COMPACT",
             LayoutMode::Radar => "RADAR",
+            LayoutMode::Performance => "PERF",
         }
     }
 
@@ -81,6 +84,7 @@ impl LayoutMode {
         match value.to_ascii_lowercase().as_str() {
             "compact" => LayoutMode::Compact,
             "radar" => LayoutMode::Radar,
+            "perf" | "performance" | "graph" => LayoutMode::Performance,
             _ => LayoutMode::Full,
         }
     }
@@ -290,6 +294,24 @@ struct Metrics {
     gs: Option<f64>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PerformanceSample {
+    pub msg_rate: Option<f64>,
+    pub flights: usize,
+    pub rssi_avg: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PerformanceSnapshot {
+    pub msg_rate: Vec<u64>,
+    pub flights: Vec<u64>,
+    pub signal: Vec<u64>,
+    pub latest_msg_rate: Option<f64>,
+    pub latest_flights: usize,
+    pub latest_signal: Option<f64>,
+    pub latest_signal_rsi: Option<f64>,
+}
+
 pub struct App {
     pub(crate) url: String,
     pub(crate) refresh: Duration,
@@ -385,6 +407,8 @@ pub struct App {
     last_metrics: HashMap<String, Metrics>,
     pub(crate) trend_cache: HashMap<String, Trend>,
     pub(crate) trail_points: HashMap<String, Vec<TrailPoint>>,
+    perf_samples: VecDeque<PerformanceSample>,
+    perf_max_samples: usize,
     pub(crate) last_export: Option<(String, SystemTime)>,
     pub(crate) route_error: Option<(String, SystemTime)>,
     // Lookup modal state
@@ -451,6 +475,10 @@ impl App {
             Duration::from_secs(0)
         } else {
             Duration::from_millis((1000.0 / ui_fps.max(1) as f64) as u64)
+        };
+        let perf_max_samples = {
+            let refresh_secs = refresh.as_secs_f64().max(0.1);
+            ((300.0 / refresh_secs) as usize).clamp(60, 300)
         };
         Self {
             url,
@@ -567,6 +595,8 @@ impl App {
             last_metrics: HashMap::new(),
             trend_cache: HashMap::new(),
             trail_points: HashMap::new(),
+            perf_samples: VecDeque::new(),
+            perf_max_samples,
             last_export: None,
             route_error: None,
             lookup_input: String::new(),
@@ -597,6 +627,7 @@ impl App {
             })
             .unwrap_or_else(SystemTime::now);
         self.update_rate(&data, now_time);
+        self.update_performance_samples(&data, now_time);
         self.update_aircraft_rates(&data, now_time);
         self.update_seen_times(&data, now_time);
         self.update_trends(&data);
@@ -1408,6 +1439,48 @@ impl App {
         self.avg_aircraft_rate
     }
 
+    pub fn performance_snapshot(&self) -> PerformanceSnapshot {
+        let mut msg_rate = Vec::with_capacity(self.perf_samples.len());
+        let mut flights = Vec::with_capacity(self.perf_samples.len());
+        let mut signal = Vec::with_capacity(self.perf_samples.len());
+        let to_rate = |value: Option<f64>| -> u64 { value.unwrap_or(0.0).max(0.0).round() as u64 };
+        let to_signal = |value: Option<f64>| -> u64 {
+            let min_db = -50.0;
+            let max_db = 0.0;
+            let clamped = value.unwrap_or(min_db).clamp(min_db, max_db);
+            let norm = (clamped - min_db) / (max_db - min_db);
+            (norm * 100.0).round() as u64
+        };
+
+        for sample in &self.perf_samples {
+            msg_rate.push(to_rate(sample.msg_rate));
+            flights.push(sample.flights as u64);
+            signal.push(to_signal(sample.rssi_avg));
+        }
+
+        if msg_rate.is_empty() {
+            msg_rate.push(0);
+            flights.push(0);
+            signal.push(0);
+        }
+
+        let (latest_msg_rate, latest_flights, latest_signal) = match self.perf_samples.back() {
+            Some(sample) => (sample.msg_rate, sample.flights, sample.rssi_avg),
+            None => (None, 0, None),
+        };
+        let latest_signal_rsi = rsi_from_series(&signal, 14);
+
+        PerformanceSnapshot {
+            msg_rate,
+            flights,
+            signal,
+            latest_msg_rate,
+            latest_flights,
+            latest_signal,
+            latest_signal_rsi,
+        }
+    }
+
     pub fn classify_aircraft(&self, ac: &Aircraft) -> AircraftRole {
         if !self.role_enabled {
             AircraftRole::Unknown
@@ -1659,6 +1732,32 @@ impl App {
 
     pub fn latest_notification(&self) -> Option<&Notification> {
         self.notifications.last()
+    }
+
+    fn update_performance_samples(&mut self, data: &ApiResponse, _now_time: SystemTime) {
+        let flights = data.aircraft.len();
+        let mut rssi_sum = 0.0;
+        let mut rssi_count = 0usize;
+        for ac in &data.aircraft {
+            if let Some(rssi) = ac.rssi {
+                rssi_sum += rssi;
+                rssi_count += 1;
+            }
+        }
+        let rssi_avg = if rssi_count > 0 {
+            Some(rssi_sum / rssi_count as f64)
+        } else {
+            None
+        };
+        let sample = PerformanceSample {
+            msg_rate: self.msg_rate_display(),
+            flights,
+            rssi_avg,
+        };
+        self.perf_samples.push_back(sample);
+        while self.perf_samples.len() > self.perf_max_samples {
+            self.perf_samples.pop_front();
+        }
     }
 
     fn update_rate(&mut self, data: &ApiResponse, now_time: SystemTime) {
@@ -2120,6 +2219,36 @@ fn normalize_callsign(value: &str) -> String {
 
 fn normalize_text(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn rsi_from_series(values: &[u64], period: usize) -> Option<f64> {
+    if period == 0 || values.len() <= period {
+        return None;
+    }
+    let start = values.len().saturating_sub(period + 1);
+    let window = &values[start..];
+    let mut gains = 0.0;
+    let mut losses = 0.0;
+    for pair in window.windows(2) {
+        let prev = pair[0] as f64;
+        let curr = pair[1] as f64;
+        if curr > prev {
+            gains += curr - prev;
+        } else if prev > curr {
+            losses += prev - curr;
+        }
+    }
+    let period_f = period as f64;
+    let avg_gain = gains / period_f;
+    let avg_loss = losses / period_f;
+    if avg_loss == 0.0 {
+        return Some(100.0);
+    }
+    if avg_gain == 0.0 {
+        return Some(0.0);
+    }
+    let rs = avg_gain / avg_loss;
+    Some(100.0 - (100.0 / (1.0 + rs)))
 }
 
 fn is_rate_limited_message(message: &str) -> bool {
@@ -2829,12 +2958,12 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 mod tests {
     use super::{
         compare_f64, compare_i64, distance_mi, load_config_items, parse_config_value,
-        watch_entry_matches, AircraftRole, App, RadarBlip, RadarRenderer, RouteInfo, TrendDir,
-        WatchEntry,
+        watch_entry_matches, AircraftRole, App, PerformanceSample, RadarBlip, RadarRenderer,
+        RouteInfo, TrendDir, WatchEntry,
     };
     use crate::config::ConfigKind;
     use crate::model::Aircraft;
-    use std::collections::HashSet;
+    use std::collections::{HashSet, VecDeque};
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
@@ -3071,6 +3200,30 @@ mod tests {
 
         let app = make_app(false, true);
         assert!(matches!(app.classify_aircraft(&ac), AircraftRole::Unknown));
+    }
+
+    #[test]
+    fn performance_snapshot_scales_signal_strength() {
+        let mut app = make_app(true, true);
+        let mut samples = VecDeque::new();
+        for i in 0..15 {
+            let rssi = -50.0 + (i as f64) * (50.0 / 14.0);
+            samples.push_back(PerformanceSample {
+                msg_rate: Some(12.0 + i as f64),
+                flights: 3 + i as usize,
+                rssi_avg: Some(rssi),
+            });
+        }
+        app.perf_samples = samples;
+
+        let snapshot = app.performance_snapshot();
+        assert_eq!(snapshot.msg_rate.last().copied(), Some(26));
+        assert_eq!(snapshot.flights.last().copied(), Some(17));
+        assert_eq!(snapshot.signal.len(), 15);
+        assert_eq!(snapshot.signal.first().copied(), Some(0));
+        assert_eq!(snapshot.signal.last().copied(), Some(100));
+        let rsi = snapshot.latest_signal_rsi.unwrap_or_default();
+        assert!(rsi >= 99.0);
     }
 
     #[test]
