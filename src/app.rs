@@ -627,8 +627,8 @@ impl App {
             })
             .unwrap_or_else(SystemTime::now);
         self.update_rate(&data, now_time);
-        self.update_performance_samples(&data, now_time);
         self.update_aircraft_rates(&data, now_time);
+        self.update_performance_samples(&data, now_time);
         self.update_seen_times(&data, now_time);
         self.update_trends(&data);
         self.update_trails(&data, now_time);
@@ -2241,6 +2241,9 @@ fn rsi_from_series(values: &[u64], period: usize) -> Option<f64> {
     let period_f = period as f64;
     let avg_gain = gains / period_f;
     let avg_loss = losses / period_f;
+    if avg_gain == 0.0 && avg_loss == 0.0 {
+        return Some(50.0);
+    }
     if avg_loss == 0.0 {
         return Some(100.0);
     }

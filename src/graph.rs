@@ -63,14 +63,7 @@ pub fn render_performance_body(f: &mut Frame, area: Rect, app: &App, theme: &Gra
     );
 }
 
-fn render_sparkline(
-    f: &mut Frame,
-    area: Rect,
-    title: &str,
-    data: &[u64],
-    fg: Color,
-    bg: Color,
-) {
+fn render_sparkline(f: &mut Frame, area: Rect, title: &str, data: &[u64], fg: Color, bg: Color) {
     let (spark_data, spark_max) = sparkline_tail(data, area.width);
     let block = Block::default()
         .borders(Borders::ALL)
