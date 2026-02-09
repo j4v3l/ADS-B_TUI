@@ -10,6 +10,7 @@ use crate::app::{
     AircraftRole, App, ColumnId, FlagStyle, InputMode, LayoutMode, SiteLocation, ThemeMode,
     TrendDir,
 };
+use crate::graph::{self, GraphTheme};
 use crate::model::seen_seconds;
 use crate::radar::{self, RadarSettings, RadarTheme};
 
@@ -47,6 +48,7 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
         LayoutMode::Full => render_full_body(f, chunks[2], app, indices),
         LayoutMode::Compact => render_compact_body(f, chunks[2], app, indices),
         LayoutMode::Radar => render_radar_body(f, chunks[2], app, indices),
+        LayoutMode::Performance => render_performance_body(f, chunks[2], app),
     }
 
     render_footer(f, chunks[3], app);
@@ -104,6 +106,16 @@ fn render_compact_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usiz
 
 fn render_radar_body(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     render_radar(f, area, app, indices);
+}
+
+fn render_performance_body(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let graph_theme = GraphTheme {
+        accent: theme.accent,
+        warn: theme.warn,
+        panel_bg: theme.panel_bg,
+    };
+    graph::render_performance_body(f, area, app, &graph_theme);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
@@ -930,7 +942,7 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  b labels  m columns  w watch  e export  C config  ? help".to_string();
+    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  p perf  b labels  m columns  w watch  e export  C config  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -1036,6 +1048,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  s          Sort (SEEN/ALT/SPD)"),
         Line::from("  l          Toggle layout (full/compact)"),
         Line::from("  R          Radar layout"),
+        Line::from("  p          Performance graph"),
         Line::from("  b          Toggle radar labels"),
         Line::from("  t          Toggle theme"),
         Line::from("  m          Columns menu"),

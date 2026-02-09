@@ -97,7 +97,7 @@ Default route queries use the airplanes.live routeset endpoint. To fall back to 
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
-| `layout` | string | "full" | UI layout mode ("full", "compact", "radar") |
+| `layout` | string | "full" | UI layout mode ("full", "compact", "radar", "perf") |
 | `theme` | string | "default" | Color theme ("default", "color", "amber", "ocean", "matrix", "mono") |
 
 ### Performance Settings
