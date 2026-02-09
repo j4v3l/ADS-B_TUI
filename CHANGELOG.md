@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## [0.1.0] - 2026-02-09
 
 ### Added
 - **Logging system** with configurable log levels, file output, and structured logging
@@ -24,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Professional project structure with CONTRIBUTING.md, LICENSE, etc.
 - Configuration guide and data sources documentation
 - Development workflow improvements with enhanced justfile
+- Initial release of ADS-B TUI
+- Real-time aircraft tracking with terminal UI
+- Support for dump1090 and similar ADS-B receivers
+- Aircraft table with customizable columns
+- Favorites system for tracking specific aircraft
+- Data export functionality (CSV/JSON)
+- Route information display
+- Basic configuration system
+- Cross-platform support (macOS, Linux)
 
 ### Changed
 - Moved FLAG column to first position in aircraft table
@@ -37,19 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flag display logic to properly handle ICAO prefix variations
 - Various code quality improvements from clippy
 - Resolved remaining clippy lints (app/radar/runtime) including replacing manual parity math in UI timing
-
-## [0.1.0] - 2026-01-XX
-
-### Added
-- Initial release of ADS-B TUI
-- Real-time aircraft tracking with terminal UI
-- Support for dump1090 and similar ADS-B receivers
-- Aircraft table with customizable columns
-- Favorites system for tracking specific aircraft
-- Data export functionality (CSV/JSON)
-- Route information display
-- Basic configuration system
-- Cross-platform support (Windows, macOS, Linux)
 
 ### Features
 - Live aircraft position, altitude, speed, and heading
