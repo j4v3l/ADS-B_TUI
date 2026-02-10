@@ -4,7 +4,7 @@ sort = "desc"
 [git]
 conventional_commits = true
 filter_unconventional = true
-tag_pattern = "*"
+tag_pattern = "^v.*"
 
 [bump]
 initial_tag = "0.0.0"
