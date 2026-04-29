@@ -147,16 +147,7 @@ pub fn run_app(
                         KeyCode::Char('s') => app.toggle_sort(),
                         KeyCode::Char('/') => app.start_filter(),
                         KeyCode::Char('c') => app.clear_filter(),
-                        KeyCode::Char('f') => {
-                            if app.toggle_favorite_selected(&indices) {
-                                if let Some(path) = app.favorites_path() {
-                                    match storage::save_favorites(path, &app.favorites) {
-                                        Ok(_) => debug!("favorites saved {}", path.display()),
-                                        Err(err) => error!("favorites save failed: {err}"),
-                                    }
-                                }
-                            }
-                        }
+                        KeyCode::Char('f') => toggle_favorite(&mut app, &indices),
                         KeyCode::Char('t') => app.toggle_theme(),
                         KeyCode::Char('l') => app.toggle_layout(),
                         KeyCode::Char('R') | KeyCode::Char('r') => {
@@ -383,6 +374,21 @@ fn send_feed_update(feed_updates: &Option<Sender<Vec<String>>>, urls: Option<Vec
     };
     if !urls.is_empty() {
         let _ = tx.send(urls);
+    }
+}
+
+fn toggle_favorite(app: &mut App, indices: &[usize]) {
+    if !app.toggle_favorite_selected(indices) {
+        return;
+    }
+
+    let Some(path) = app.favorites_path() else {
+        return;
+    };
+
+    match storage::save_favorites(path, &app.favorites) {
+        Ok(_) => debug!("favorites saved {}", path.display()),
+        Err(err) => error!("favorites save failed: {err}"),
     }
 }
 
