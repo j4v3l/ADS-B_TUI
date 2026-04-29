@@ -76,6 +76,10 @@ pub fn ui(f: &mut Frame, app: &mut App, indices: &[usize]) {
     if app.input_mode == InputMode::Lookup {
         render_lookup_menu(f, size, app);
     }
+
+    if app.input_mode == InputMode::QuitConfirm {
+        render_quit_confirm(f, size, app);
+    }
 }
 
 fn render_full_body(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
@@ -138,16 +142,11 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         .map(format_system_time)
         .unwrap_or_else(|| "--".to_string());
 
-    let status = if let Some(err) = &app.last_error {
-        format!("ERR: {err}")
-    } else {
-        "OK".to_string()
-    };
-
+    let status = status_text(app.last_error.as_ref());
     let status_color = if app.last_error.is_some() {
         theme.danger
     } else {
-        Color::Green
+        theme.accent
     };
 
     let spinner = ["|", "/", "-", "\\"][phase_index(200, 4)];
@@ -187,10 +186,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
-        Span::styled(
-            format!("AIRCRAFT {count}"),
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(format!("AIR {count}"), Style::default().fg(Color::Cyan)),
         Span::raw(" | "),
         Span::raw(format!("MSGS {msg_total}")),
         Span::raw(" | "),
@@ -205,13 +201,7 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let line_bottom = Line::from(vec![
         Span::raw(format!("API {api_time}")),
         Span::raw(" | "),
-        Span::raw(format!("SORT {}", app.sort.label())),
-        Span::raw(" | "),
-        Span::raw(format!("VIEW {}", app.layout_mode.label())),
-        Span::raw(" | "),
-        Span::raw(format!("THEME {}", app.theme_mode.label())),
-        Span::raw(" | "),
-        Span::raw(format!("LAST {update_time}")),
+        Span::raw(format!("UPD {update_time}")),
         Span::raw(" | "),
         Span::styled(format!("SYNC {spinner}"), sync_style),
         Span::raw(" | "),
@@ -221,16 +211,6 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
                 .fg(status_color)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(" | "),
-        Span::styled("MENU ", Style::default().fg(theme.dim)),
-        Span::styled("[s]Sort ", Style::default().fg(theme.dim)),
-        Span::styled("[/]Filter ", Style::default().fg(theme.dim)),
-        Span::styled("[m]Cols ", Style::default().fg(theme.dim)),
-        Span::styled("[C]Config ", Style::default().fg(theme.dim)),
-        Span::styled("[W]Watch ", Style::default().fg(theme.dim)),
-        Span::styled("[g]Lookup ", Style::default().fg(theme.dim)),
-        Span::styled("[L]Legend ", Style::default().fg(theme.dim)),
-        Span::styled("[?]Help", Style::default().fg(theme.dim)),
     ]);
 
     let title = if app.demo_mode { "FEED (DEMO)" } else { "FEED" };
@@ -320,12 +300,7 @@ fn render_alerts(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
     spans.extend(alert_span("LOWNIC", low_nic, theme.warn));
     spans.extend(alert_span("LOWNAC", low_nac, theme.warn));
     spans.extend(alert_span("FAV", favs, theme.fav));
-    let near_color = if phase_ms(800) {
-        theme.accent
-    } else {
-        theme.warn
-    };
-    spans.extend(alert_span("NEAR", near, near_color));
+    spans.extend(alert_span("NEAR", near, theme.warn));
     spans.extend(alert_span("RERR", route_err, theme.danger));
 
     let filter_style = if app.input_mode == InputMode::Filter {
@@ -382,7 +357,7 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
             now.duration_since(*when)
                 .ok()
                 .filter(|d| d.as_secs() <= 60)
-                .map(|_| truncate(msg, 24))
+                .map(|_| short_error_code(msg))
         })
         .unwrap_or_else(|| "--".to_string());
 
@@ -436,7 +411,7 @@ fn render_stats(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .title("STATS");
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -591,9 +566,6 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         .style(Style::default().bg(theme.header_bg))
         .height(1);
 
-    let fresh_pulse = phase_ms(650);
-    let stale_pulse = phase_ms(900);
-
     let rows = indices.iter().enumerate().map(|(i, idx)| {
         let ac = &app.data.aircraft[*idx];
         let seen = seen_seconds(ac);
@@ -616,38 +588,16 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
         };
 
         if overpass {
-            style = style.fg(Color::Green).add_modifier(Modifier::BOLD);
+            style = style.fg(theme.accent).add_modifier(Modifier::BOLD);
         } else if app.role_enabled && app.role_highlight && matches!(role, AircraftRole::Military) {
-            // Pulse colors (no terminal blink dependency) to highlight MIL rows.
-            let pulse = phase_ms(350);
-            let fg = if pulse { theme.accent } else { theme.danger };
-            let bg = if pulse {
-                theme.header_bg
-            } else {
-                theme.panel_bg
-            };
-            style = style.fg(fg).bg(bg).add_modifier(Modifier::BOLD);
+            style = style.fg(theme.danger).add_modifier(Modifier::BOLD);
         } else if app.role_enabled && app.role_highlight && matches!(role, AircraftRole::Government)
         {
-            style = style
-                .fg(theme.warn)
-                .bg(theme.header_bg)
-                .add_modifier(Modifier::BOLD);
+            style = style.fg(theme.warn).add_modifier(Modifier::BOLD);
         } else if seen.map(|s| s <= 1.0).unwrap_or(false) {
-            style = if fresh_pulse {
-                style
-                    .fg(theme.accent)
-                    .bg(theme.header_bg)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                style.fg(theme.accent)
-            };
+            style = style.fg(theme.accent).add_modifier(Modifier::BOLD);
         } else if stale {
-            style = if stale_pulse {
-                style.fg(theme.danger)
-            } else {
-                style.fg(theme.dim)
-            };
+            style = style.fg(theme.dim);
         } else if watchlisted {
             style = style.fg(theme.watch).add_modifier(Modifier::BOLD);
         }
@@ -684,7 +634,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &mut App, indices: &[usize]) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .title("AIRSPACE")
         .style(Style::default().bg(theme.panel_bg));
 
@@ -721,16 +671,12 @@ fn render_details(f: &mut Frame, area: Rect, app: &App, indices: &[usize]) {
                 AircraftRole::Military => (
                     "MILITARY",
                     Style::default()
-                        .fg(theme.warn)
-                        .bg(theme.header_bg)
+                        .fg(theme.danger)
                         .add_modifier(Modifier::BOLD),
                 ),
                 AircraftRole::Government => (
                     "GOVERNMENT",
-                    Style::default()
-                        .fg(theme.accent)
-                        .bg(theme.header_bg)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
                 ),
                 AircraftRole::Commercial => ("COMMERCIAL", Style::default().fg(theme.dim)),
                 AircraftRole::Unknown => ("UNKNOWN", Style::default().fg(theme.dim)),
@@ -942,7 +888,8 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    let mut help = "q quit  s sort  / filter  f favorite  c clear  t theme  l layout  R radar  p perf  b labels  m columns  w watch  e export  C config  ? help".to_string();
+    let mut help =
+        "q quit?  / filter  s sort  +/- zoom  Shift+arrows pan  R radar  ? help".to_string();
     let source = short_source(&app.url);
     help.push_str(&format!("  REF {}s  SRC {}", app.refresh.as_secs(), source));
 
@@ -1021,24 +968,31 @@ fn render_columns_menu(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, popup);
 }
 
-fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
+fn render_help_menu(f: &mut Frame, area: Rect, app: &mut App) {
     let theme = theme(app.theme_mode);
-    let popup = centered_rect(70, 20, area);
+    let popup = centered_rect(64, 20, area);
 
     f.render_widget(Clear, popup);
 
-    let lines = vec![
-        Line::from(Span::styled(
-            "HELP",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        )),
+    let header = Line::from(Span::styled(
+        "HELP",
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    ));
+    let footer = Line::from(Span::styled(
+        "Up/Down scroll  PageUp/PageDown faster  Esc close",
+        Style::default().fg(theme.dim),
+    ));
+
+    let content = vec![
         Line::from(Span::styled(
             "Navigation",
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )),
         Line::from("  ↑/↓        Move selection"),
+        Line::from("  ←/→        Move selection in radar view"),
+        Line::from("  Shift+↑/↓/←/→ Pan radar/feed center"),
         Line::from("  Mouse      Scroll to move • Click row to select"),
         Line::from(""),
         Line::from(Span::styled(
@@ -1048,6 +1002,7 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  s          Sort (SEEN/ALT/SPD)"),
         Line::from("  l          Toggle layout (full/compact)"),
         Line::from("  R          Radar layout"),
+        Line::from("  + / -      Zoom radar/feed range"),
         Line::from("  p          Performance graph"),
         Line::from("  b          Toggle radar labels"),
         Line::from("  t          Toggle theme"),
@@ -1076,15 +1031,27 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
             "Quit",
             Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
         )),
-        Line::from("  q          Quit"),
-        Line::from("  ? / h      Toggle help"),
+        Line::from("  q          Confirm quit"),
+        Line::from("  ? / h      Close help"),
         Line::from("  L          Legend"),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Press Esc to close",
-            Style::default().fg(theme.dim),
-        )),
     ];
+
+    let available = popup.height.saturating_sub(2) as usize;
+    let body_height = available.saturating_sub(2).max(1);
+    let max_scroll = content.len().saturating_sub(body_height);
+    if app.help_scroll > max_scroll {
+        app.help_scroll = max_scroll;
+    }
+    let start = app.help_scroll;
+    let end = (start + body_height).min(content.len());
+
+    let mut lines = Vec::with_capacity(body_height + 2);
+    lines.push(header);
+    lines.extend(content[start..end].iter().cloned());
+    while lines.len() < body_height + 1 {
+        lines.push(Line::from(""));
+    }
+    lines.push(footer);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1094,6 +1061,30 @@ fn render_help_menu(f: &mut Frame, area: Rect, app: &App) {
         .block(block)
         .wrap(Wrap { trim: true })
         .style(Style::default().bg(theme.panel_bg));
+    f.render_widget(paragraph, popup);
+}
+
+fn render_quit_confirm(f: &mut Frame, area: Rect, app: &App) {
+    let theme = theme(app.theme_mode);
+    let popup = centered_rect(42, 5, area);
+
+    f.render_widget(Clear, popup);
+
+    let lines = vec![
+        Line::from("Are you sure you wanna quit?"),
+        Line::from(""),
+        Line::from("Enter/y quit    Esc/n cancel"),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme.dim))
+        .title("QUIT");
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: true })
+        .style(Style::default().fg(theme.dim).bg(theme.panel_bg));
     f.render_widget(paragraph, popup);
 }
 
@@ -1540,6 +1531,8 @@ fn legend_items() -> Vec<&'static str> {
         "  * / o    ASCII fallback current/trail",
         "  F / f    ASCII favorite current/trail",
         "  X        Selected target (radar view)",
+        "  Arrows   Select nearest target in radar view",
+        "  +/-      Zoom radar range; Shift+arrows pan",
     ]
 }
 
@@ -1769,6 +1762,44 @@ fn center_text(value: &str, width: usize) -> String {
         out.push(' ');
     }
     out
+}
+
+enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+fn align_text(value: &str, width: usize, align: TextAlign) -> String {
+    if width == 0 {
+        return value.to_string();
+    }
+    let len = text_len(value);
+    if len >= width {
+        return value.to_string();
+    }
+    let pad_total = width - len;
+    match align {
+        TextAlign::Left => format!("{value}{:pad$}", "", pad = pad_total),
+        TextAlign::Right => format!("{:pad$}{value}", "", pad = pad_total),
+        TextAlign::Center => center_text(value, width),
+    }
+}
+
+fn column_align(id: ColumnId) -> TextAlign {
+    match id {
+        ColumnId::Fav | ColumnId::Watch | ColumnId::Flag => TextAlign::Center,
+        ColumnId::Alt
+        | ColumnId::Gs
+        | ColumnId::Trk
+        | ColumnId::Lat
+        | ColumnId::Lon
+        | ColumnId::Dist
+        | ColumnId::Brg
+        | ColumnId::Seen
+        | ColumnId::Msgs => TextAlign::Right,
+        _ => TextAlign::Left,
+    }
 }
 
 fn text_len(value: &str) -> usize {
@@ -2082,7 +2113,7 @@ fn cell_for_column(
     };
 
     text = truncate_to_width(text, width);
-    let text = center_text(&text, width);
+    let text = align_text(&text, width, column_align(id));
 
     if id == ColumnId::Fav && favorite {
         Cell::from(text).style(Style::default().fg(theme.fav).add_modifier(Modifier::BOLD))
@@ -2136,6 +2167,51 @@ fn short_source(url: &str) -> String {
     } else {
         text
     }
+}
+
+fn status_text(error: Option<&String>) -> String {
+    match error {
+        None => "OK".to_string(),
+        Some(msg) => {
+            let code = short_error_code(msg);
+            if code == "ERR" {
+                "ERR".to_string()
+            } else {
+                format!("ERR {code}")
+            }
+        }
+    }
+}
+
+fn short_error_code(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many") {
+        return "429".to_string();
+    }
+    if lower.contains("timeout") {
+        return "TIMEOUT".to_string();
+    }
+    if let Some(code) = parse_http_status(message) {
+        return code;
+    }
+    if lower.contains("parse") {
+        return "PARSE".to_string();
+    }
+    "ERR".to_string()
+}
+
+fn parse_http_status(message: &str) -> Option<String> {
+    let mut iter = message.split_whitespace();
+    while let Some(word) = iter.next() {
+        if word.eq_ignore_ascii_case("http") {
+            if let Some(code) = iter.next() {
+                if code.chars().all(|c| c.is_ascii_digit()) {
+                    return Some(code.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -2360,18 +2436,18 @@ fn flag_emoji(registration: Option<&str>) -> &'static str {
 fn theme(mode: ThemeMode) -> Theme {
     match mode {
         ThemeMode::Default => Theme {
-            accent: Color::Yellow,
-            warn: Color::Yellow,
-            danger: Color::Red,
-            dim: Color::DarkGray,
-            highlight_fg: Color::Black,
-            highlight_bg: Color::Rgb(200, 200, 200),
-            fav: Color::Yellow,
-            watch: Color::LightBlue,
-            row_even_bg: Color::Rgb(20, 20, 24),
-            row_odd_bg: Color::Rgb(12, 12, 16),
-            header_bg: Color::Rgb(24, 24, 28),
-            panel_bg: Color::Rgb(18, 18, 22),
+            accent: Color::Rgb(108, 221, 214),
+            warn: Color::Rgb(255, 200, 120),
+            danger: Color::Rgb(255, 102, 102),
+            dim: Color::Rgb(140, 150, 160),
+            highlight_fg: Color::Rgb(8, 12, 16),
+            highlight_bg: Color::Rgb(198, 238, 232),
+            fav: Color::Rgb(255, 221, 132),
+            watch: Color::Rgb(120, 200, 255),
+            row_even_bg: Color::Rgb(20, 22, 26),
+            row_odd_bg: Color::Rgb(18, 20, 24),
+            header_bg: Color::Rgb(28, 32, 38),
+            panel_bg: Color::Rgb(22, 26, 32),
         },
         ThemeMode::ColorBlind => Theme {
             accent: Color::Cyan,

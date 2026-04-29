@@ -46,15 +46,12 @@ fn main() -> Result<()> {
     } else {
         Some(config.api_key_header.clone())
     };
-
-    spawn_fetcher(
-        config.urls.clone(),
-        config.refresh,
-        config.insecure,
-        api_key.clone(),
-        api_key_header.clone(),
-        tx,
-    );
+    let feed_templates = config::active_url_templates(&config);
+    let feed_urls = config::initial_fetch_urls(&config)?;
+    let display_url = feed_urls
+        .first()
+        .cloned()
+        .unwrap_or_else(|| config.url.clone());
 
     let mut favorites: HashSet<String> = config
         .favorites
@@ -108,6 +105,17 @@ fn main() -> Result<()> {
         }),
         _ => None,
     };
+    let (feed_update_tx, feed_update_rx) = mpsc::channel();
+
+    spawn_fetcher(
+        feed_urls,
+        config.refresh,
+        config.insecure,
+        api_key.clone(),
+        api_key_header.clone(),
+        feed_update_rx,
+        tx,
+    );
 
     let mut terminal = init_terminal()?;
     let route_channels = if config.route_enabled {
@@ -150,7 +158,8 @@ fn main() -> Result<()> {
     let res = run_app(
         &mut terminal,
         App::new(
-            config.url,
+            display_url,
+            feed_templates,
             config.refresh,
             config.stale_secs as f64,
             config.hide_stale,
@@ -201,6 +210,7 @@ fn main() -> Result<()> {
         rx,
         route_channels,
         Some(lookup_channels),
+        Some(feed_update_tx),
     );
     restore_terminal(&mut terminal)?;
 

@@ -1,4 +1,4 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,20 +18,12 @@ pub fn spawn_fetcher(
     insecure: bool,
     api_key: Option<String>,
     api_key_header: Option<String>,
+    update_rx: Receiver<Vec<String>>,
     tx: Sender<Result<ApiResponse, String>>,
 ) {
     thread::spawn(move || {
         info!("fetcher started");
-        let mut sources: Vec<SourceState> = urls
-            .into_iter()
-            .map(|u| u.trim().to_string())
-            .filter(|u| !u.is_empty())
-            .map(|url| SourceState {
-                url,
-                attempts: 0,
-                backoff_until: None,
-            })
-            .collect();
+        let mut sources = build_sources(urls);
         if sources.is_empty() {
             let _ = tx.send(Err("No URLs configured".to_string()));
             return;
@@ -57,18 +49,31 @@ pub fn spawn_fetcher(
 
         let mut current = 0usize;
         loop {
+            drain_source_updates(&update_rx, &mut sources, &mut current);
             let now = Instant::now();
 
             // Find next source that is not in backoff.
             let mut checked = 0usize;
+            let mut min_wait: Option<Duration> = None;
             while checked < sources.len()
                 && sources
                     .get(current)
                     .and_then(|s| s.backoff_until)
                     .is_some_and(|until| until > now)
             {
+                if let Some(until) = sources.get(current).and_then(|s| s.backoff_until) {
+                    if until > now {
+                        let wait = until.saturating_duration_since(now);
+                        min_wait = Some(min_wait.map_or(wait, |min| min.min(wait)));
+                    }
+                }
                 current = (current + 1) % sources.len();
                 checked += 1;
+            }
+            if checked == sources.len() {
+                let wait = min_wait.unwrap_or(sleep);
+                wait_for_source_update(&update_rx, &mut sources, &mut current, wait);
+                continue;
             }
 
             let src = &mut sources[current];
@@ -105,9 +110,62 @@ pub fn spawn_fetcher(
                 }
             }
 
-            thread::sleep(sleep);
+            wait_for_source_update(&update_rx, &mut sources, &mut current, sleep);
         }
     });
+}
+
+fn build_sources(urls: Vec<String>) -> Vec<SourceState> {
+    urls.into_iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .map(|url| SourceState {
+            url,
+            attempts: 0,
+            backoff_until: None,
+        })
+        .collect()
+}
+
+fn source_urls(sources: &[SourceState]) -> Vec<String> {
+    sources.iter().map(|source| source.url.clone()).collect()
+}
+
+fn apply_source_update(
+    sources: &mut Vec<SourceState>,
+    current: &mut usize,
+    urls: Vec<String>,
+) -> bool {
+    let next = build_sources(urls);
+    if next.is_empty() || source_urls(sources) == source_urls(&next) {
+        return false;
+    }
+    *sources = next;
+    *current = 0;
+    info!("fetch sources updated: {}", sources.len());
+    true
+}
+
+fn drain_source_updates(
+    update_rx: &Receiver<Vec<String>>,
+    sources: &mut Vec<SourceState>,
+    current: &mut usize,
+) {
+    while let Ok(urls) = update_rx.try_recv() {
+        apply_source_update(sources, current, urls);
+    }
+}
+
+fn wait_for_source_update(
+    update_rx: &Receiver<Vec<String>>,
+    sources: &mut Vec<SourceState>,
+    current: &mut usize,
+    timeout: Duration,
+) -> bool {
+    match update_rx.recv_timeout(timeout) {
+        Ok(urls) => apply_source_update(sources, current, urls),
+        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => false,
+    }
 }
 
 fn fetch_once(
@@ -198,6 +256,51 @@ fn backoff_duration(attempts: u32) -> Duration {
                                    // Simple deterministic jitter without extra deps.
     let jitter_ms = (attempts as u64 * 173) % 1000;
     Duration::from_secs(base_secs.min(60)).saturating_add(Duration::from_millis(jitter_ms))
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::{apply_source_update, build_sources, source_urls};
+
+    #[test]
+    fn source_update_rebuilds_and_trims_urls() {
+        let mut sources = build_sources(vec![" http://old.test ".to_string()]);
+        let mut current = 3;
+
+        assert!(apply_source_update(
+            &mut sources,
+            &mut current,
+            vec![
+                " https://new.test/a ".to_string(),
+                "".to_string(),
+                "https://new.test/b".to_string(),
+            ],
+        ));
+        assert_eq!(current, 0);
+        assert_eq!(
+            source_urls(&sources),
+            vec!["https://new.test/a", "https://new.test/b"]
+        );
+    }
+
+    #[test]
+    fn source_update_ignores_identical_or_empty_lists() {
+        let mut sources = build_sources(vec!["https://same.test".to_string()]);
+        let mut current = 1;
+
+        assert!(!apply_source_update(
+            &mut sources,
+            &mut current,
+            vec!["https://same.test".to_string()],
+        ));
+        assert_eq!(current, 1);
+        assert!(!apply_source_update(
+            &mut sources,
+            &mut current,
+            vec![" ".to_string()],
+        ));
+        assert_eq!(source_urls(&sources), vec!["https://same.test"]);
+    }
 }
 
 #[cfg(all(test, feature = "net-tests"))]

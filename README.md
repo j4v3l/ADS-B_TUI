@@ -82,6 +82,10 @@ Create an `adsb-tui.toml` file in the same directory as the binary:
 # ADS-B data source URL
 url = "http://your-adsb-receiver/data/aircraft.json"
 
+# Dynamic point-feed template. When set, +/− and Shift+arrows update
+# {lat}, {lon}, and {range_nm} before each fetch.
+# url_template = "https://api.airplanes.live/v2/point/{lat}/{lon}/{range_nm}"
+
 # Refresh interval in seconds (0 = fast refresh, clamped to 200ms)
 refresh_secs = 1
 
@@ -138,6 +142,8 @@ API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app con
 | Option | Description | Default |
 | ------ | ----------- | ------- |
 | `url` | ADS-B data source URL | Required |
+| `url_template` | Dynamic ADS-B point-feed URL template using `{lat}`, `{lon}`, `{range_nm}` | unset |
+| `url_templates` | Dynamic fallback URL templates; takes precedence over `url_template` | unset |
 | `refresh_secs` | Data refresh interval (0 = fast refresh, clamped to 200ms) | 2 |
 | `insecure` | Allow self-signed certificates | false |
 | `allow_http` | Allow http:// URLs | true |
@@ -175,6 +181,9 @@ API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app con
 | `l` | Cycle layout (full/compact) |
 | `R` | Jump to radar layout |
 | `b` | Toggle radar labels |
+| `+` / `-` | Zoom radar/feed range |
+| `Shift` + `↑/↓/←/→` | Pan radar/feed center |
+| `↑/↓/←/→` in radar view | Select nearest aircraft in that direction |
 | `m` | Columns menu |
 | `w` | Watchlist |
 | `t` | Toggle theme |

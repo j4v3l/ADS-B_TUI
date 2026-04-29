@@ -99,6 +99,11 @@ pub fn config_specs() -> &'static [ConfigSpec] {
             default: Some(ConfigValue::Str(DEFAULT_URL)),
         },
         ConfigSpec {
+            key: "url_template",
+            kind: ConfigKind::Str,
+            default: None,
+        },
+        ConfigSpec {
             key: "refresh_secs",
             kind: ConfigKind::Int,
             default: Some(ConfigValue::Int(DEFAULT_REFRESH_SECS as i64)),
@@ -381,6 +386,8 @@ pub fn config_specs() -> &'static [ConfigSpec] {
 pub struct Config {
     pub url: String,
     pub urls: Vec<String>,
+    pub url_template: Option<String>,
+    pub url_templates: Vec<String>,
     pub refresh: Duration,
     pub insecure: bool,
     pub allow_http: bool,
@@ -444,6 +451,8 @@ pub struct Config {
 struct FileConfig {
     url: Option<String>,
     urls: Option<Vec<String>>,
+    url_template: Option<String>,
+    url_templates: Option<Vec<String>>,
     refresh_secs: Option<u64>,
     insecure: Option<bool>,
     allow_http: Option<bool>,
@@ -524,6 +533,8 @@ pub fn parse_args() -> Result<Config> {
     let mut config = Config {
         url: DEFAULT_URL.to_string(),
         urls: vec![DEFAULT_URL.to_string()],
+        url_template: None,
+        url_templates: Vec::new(),
         refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
         insecure: false,
         allow_http: DEFAULT_ALLOW_HTTP,
@@ -597,13 +608,21 @@ pub fn parse_args() -> Result<Config> {
         config.url = url;
     }
     if let Ok(value) = env::var("ADSB_URLS") {
-        let urls: Vec<String> = value
-            .split(',')
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-            .collect();
+        let urls = split_list(&value);
         if !urls.is_empty() {
             config.urls = urls;
+        }
+    }
+    if let Ok(value) = env::var("ADSB_URL_TEMPLATE") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            config.url_template = Some(trimmed.to_string());
+        }
+    }
+    if let Ok(value) = env::var("ADSB_URL_TEMPLATES") {
+        let templates = split_list(&value);
+        if !templates.is_empty() {
+            config.url_templates = templates;
         }
     }
     if let Ok(value) = env::var("ADSB_REFRESH") {
@@ -841,6 +860,13 @@ pub fn parse_args() -> Result<Config> {
                     .next()
                     .ok_or_else(|| anyhow!("--url needs a value"))?
                     .to_string();
+            }
+            "--url-template" => {
+                config.url_template = Some(
+                    iter.next()
+                        .ok_or_else(|| anyhow!("--url-template needs a value"))?
+                        .to_string(),
+                );
             }
             "--refresh" => {
                 let value = iter
@@ -1166,6 +1192,7 @@ pub fn parse_args() -> Result<Config> {
         }
     }
 
+    normalize_urls(&mut config);
     validate_security(&config)?;
     Ok(config)
 }
@@ -1184,6 +1211,12 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     }
     if let Some(urls) = file.urls {
         target.urls = urls;
+    }
+    if let Some(url_template) = file.url_template {
+        target.url_template = Some(url_template);
+    }
+    if let Some(url_templates) = file.url_templates {
+        target.url_templates = url_templates;
     }
     if let Some(refresh) = file.refresh_secs {
         target.refresh = Duration::from_secs(refresh);
@@ -1355,9 +1388,125 @@ fn apply_file_config(target: &mut Config, file: FileConfig) {
     }
 }
 
+pub fn active_url_templates(config: &Config) -> Vec<String> {
+    let templates = if config.url_templates.is_empty() {
+        config
+            .url_template
+            .as_ref()
+            .map(|template| vec![template.clone()])
+            .unwrap_or_default()
+    } else {
+        config.url_templates.clone()
+    };
+    templates
+        .into_iter()
+        .map(|template| template.trim().to_string())
+        .filter(|template| !template.is_empty())
+        .collect()
+}
+
+pub fn initial_fetch_urls(config: &Config) -> Result<Vec<String>> {
+    let templates = active_url_templates(config);
+    if !templates.is_empty() {
+        let (Some(lat), Some(lon)) = (config.site_lat, config.site_lon) else {
+            return Err(anyhow!(
+                "url_template/url_templates require site_lat and site_lon"
+            ));
+        };
+        return Ok(render_url_templates(
+            &templates,
+            lat,
+            lon,
+            config.radar_range_nm.max(1.0),
+        ));
+    }
+
+    Ok(static_urls(config))
+}
+
+pub fn render_url_templates(
+    templates: &[String],
+    lat: f64,
+    lon: f64,
+    range_nm: f64,
+) -> Vec<String> {
+    templates
+        .iter()
+        .map(|template| render_url_template(template, lat, lon, range_nm))
+        .filter(|url| !url.trim().is_empty())
+        .collect()
+}
+
+pub fn render_url_template(template: &str, lat: f64, lon: f64, range_nm: f64) -> String {
+    let lat_text = format!("{lat:.6}");
+    let lon_text = format!("{lon:.6}");
+    let range_text = format_range_nm(range_nm.max(1.0));
+    template
+        .replace("{lat}", &lat_text)
+        .replace("{lon}", &lon_text)
+        .replace("{range_nm}", &range_text)
+        .replace("{range}", &range_text)
+        .replace("{zoom}", &range_text)
+}
+
+fn format_range_nm(value: f64) -> String {
+    if (value.fract()).abs() < 0.000001 {
+        format!("{value:.0}")
+    } else {
+        let text = format!("{value:.3}");
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn normalize_urls(config: &mut Config) {
+    config.urls = static_urls(config);
+    if let Some(first) = config.urls.first() {
+        config.url = first.clone();
+    }
+    if let Some(template) = config.url_template.as_ref() {
+        if template.trim().is_empty() {
+            config.url_template = None;
+        }
+    }
+    config.url_templates = config
+        .url_templates
+        .iter()
+        .map(|template| template.trim().to_string())
+        .filter(|template| !template.is_empty())
+        .collect();
+}
+
+fn static_urls(config: &Config) -> Vec<String> {
+    let mut urls: Vec<String> = config
+        .urls
+        .iter()
+        .map(|url| url.trim().to_string())
+        .filter(|url| !url.is_empty())
+        .collect();
+    let primary = config.url.trim();
+    if urls.is_empty() {
+        if !primary.is_empty() {
+            urls.push(primary.to_string());
+        }
+    } else if !primary.is_empty() && urls.first().map(|url| url.as_str()) != Some(primary) {
+        urls[0] = primary.to_string();
+    }
+    urls
+}
+
+fn split_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .collect()
+}
+
 fn print_help() {
     println!("adsb-tui");
-    println!("Usage: adsb-tui [--url URL] [--refresh SECONDS] [--insecure]");
+    println!(
+        "Usage: adsb-tui [--url URL] [--url-template TEMPLATE] [--refresh SECONDS] [--insecure]"
+    );
     println!("       [--allow-http] [--allow-insecure]");
     println!("       [--filter TEXT] [--favorite HEX] [--favorites-file PATH] [--config PATH]");
     println!("       [--api-key KEY] [--api-key-header NAME]");
@@ -1385,6 +1534,7 @@ fn print_help() {
     println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
     println!("Environment: ADSB_URL overrides the primary URL");
     println!("Environment: ADSB_URLS sets comma-separated fallback URLs");
+    println!("Environment: ADSB_URL_TEMPLATE/TEMPLATES configure dynamic point feed URLs");
     println!("Environment: ADSB_INSECURE=1 enables invalid TLS certs");
     println!("Environment: ADSB_ALLOW_HTTP=1 allows http:// URLs");
     println!("Environment: ADSB_ALLOW_INSECURE=1 allows --insecure");
@@ -1409,12 +1559,13 @@ fn print_help() {
     println!("Environment: ADSB_DEMO_MODE toggles demo mode");
     println!("Environment: ADSB_STATS_METRIC_1/2/3 control stats metrics");
     println!("Keys: q quit | up/down move | s sort | / filter | f favorite | m columns | ? help");
-    println!("      t theme | l layout | R radar | b labels | e export csv | E export json");
+    println!("      t theme | l layout | R radar | b labels | +/- zoom | Shift+arrows pan");
+    println!("      e export csv | E export json");
     println!("      C config editor");
 }
 
 fn validate_security(config: &Config) -> Result<()> {
-    for url in config.urls.iter().chain(std::iter::once(&config.url)) {
+    for url in initial_fetch_urls(config)? {
         let trimmed = url.trim();
         if trimmed.to_ascii_lowercase().starts_with("http://") && !config.allow_http {
             return Err(anyhow!(
@@ -1452,6 +1603,8 @@ mod tests {
         Config {
             url: DEFAULT_URL.to_string(),
             urls: vec![DEFAULT_URL.to_string()],
+            url_template: None,
+            url_templates: Vec::new(),
             refresh: Duration::from_secs(DEFAULT_REFRESH_SECS),
             insecure: false,
             allow_http: DEFAULT_ALLOW_HTTP,
@@ -1527,10 +1680,48 @@ mod tests {
     }
 
     #[test]
+    fn url_template_rendering_uses_aliases() {
+        let url = render_url_template(
+            "https://example.test/{lat}/{lon}/{range_nm}/{range}/{zoom}",
+            26.1234567,
+            -80.7654321,
+            12.5,
+        );
+        assert_eq!(
+            url,
+            "https://example.test/26.123457/-80.765432/12.5/12.5/12.5"
+        );
+    }
+
+    #[test]
+    fn url_templates_require_site_coordinates() {
+        let mut cfg = base_config();
+        cfg.url_template = Some("https://example.test/{lat}/{lon}/{range_nm}".to_string());
+        let err = validate_security(&cfg).unwrap_err();
+        assert!(err.to_string().contains("require site_lat and site_lon"));
+    }
+
+    #[test]
+    fn url_templates_take_precedence_over_static_urls() {
+        let mut cfg = base_config();
+        cfg.url = "http://static.test/data.json".to_string();
+        cfg.urls = vec![cfg.url.clone()];
+        cfg.url_template = Some("https://example.test/{lat}/{lon}/{range_nm}".to_string());
+        cfg.site_lat = Some(26.0);
+        cfg.site_lon = Some(-80.0);
+        cfg.radar_range_nm = 25.0;
+
+        let urls = initial_fetch_urls(&cfg).unwrap();
+        assert_eq!(urls, vec!["https://example.test/26.000000/-80.000000/25"]);
+    }
+
+    #[test]
     fn load_file_config_parses_values() {
         let path = temp_file("config.toml");
         let content = r#"
 url = "http://example.test/data.json"
+url_template = "https://api.example.test/point/{lat}/{lon}/{range_nm}"
+url_templates = ["https://api.example.test/point/{lat}/{lon}/{range_nm}", "https://backup.example.test/point/{lat}/{lon}/{zoom}"]
 refresh_secs = 3
 api_key = "abc123"
 api_key_header = "api-auth"
@@ -1553,6 +1744,11 @@ role_highlight = false
         fs::write(&path, content).unwrap();
         let cfg = load_file_config(&path).unwrap().unwrap();
         assert_eq!(cfg.url.as_deref(), Some("http://example.test/data.json"));
+        assert_eq!(
+            cfg.url_template.as_deref(),
+            Some("https://api.example.test/point/{lat}/{lon}/{range_nm}")
+        );
+        assert_eq!(cfg.url_templates.as_ref().map(|v| v.len()), Some(2));
         assert_eq!(cfg.refresh_secs, Some(3));
         assert_eq!(cfg.api_key.as_deref(), Some("abc123"));
         assert_eq!(cfg.api_key_header.as_deref(), Some("api-auth"));
@@ -1580,6 +1776,8 @@ role_highlight = false
         let mut cfg = base_config();
         let file = FileConfig {
             route_batch: Some(0),
+            url_template: Some("https://example.test/{lat}/{lon}/{range}".to_string()),
+            url_templates: Some(vec!["https://backup.test/{lat}/{lon}/{zoom}".to_string()]),
             rate_window_ms: Some(10),
             notify_cooldown_secs: Some(2),
             api_key: Some("key".to_string()),
@@ -1602,6 +1800,11 @@ role_highlight = false
             ..Default::default()
         };
         apply_file_config(&mut cfg, file);
+        assert_eq!(
+            cfg.url_template.as_deref(),
+            Some("https://example.test/{lat}/{lon}/{range}")
+        );
+        assert_eq!(cfg.url_templates.len(), 1);
         assert_eq!(cfg.route_batch, 1);
         assert_eq!(cfg.rate_window_ms, 50);
         assert_eq!(cfg.notify_cooldown_secs, 10);

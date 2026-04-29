@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-04-29
+
+### Added
+- Runtime radar viewport controls: `+`/`=` zoom in, `-` zooms out, and Shift+arrow keys pan the radar/feed center.
+- Dynamic feed URL templates with `{lat}`, `{lon}`, `{range_nm}`, `{range}`, and `{zoom}` placeholders for point feeds that follow the active radar viewport.
+- 2D radar-only arrow navigation that selects the nearest plotted aircraft north, south, east, or west of the current target.
+- Selected aircraft rendering on the radar canvas and ASCII fallback so the current target remains visible even when labels are disabled.
+- Quit confirmation modal for `q`, with explicit confirm/cancel controls.
+
+### Changed
+- Separated receiver/home site location from mutable radar/feed center so distance, bearing, overpass, and notifications keep using the configured site.
+- Updated radar help, footer, legend, README, configuration docs, and data-source docs for viewport controls and dynamic URL templates.
+- Tightened radar and table display styling for selection, compact status text, and modal readability.
+
+### Fixed
+- Remote point-feed fetching now updates promptly after radar pan/zoom by replacing source URLs and interrupting fetcher sleeps.
+- Radar selected-target display now uses first-class selected point state instead of relying only on labels or a thin overlay marker.
+- Selection panels now distinguish selected aircraft that are outside the current radar range or missing position data.
+- Clippy warnings in runtime key handling were resolved.
+
 ## [0.1.0] - 2026-02-09
 
 ### Added

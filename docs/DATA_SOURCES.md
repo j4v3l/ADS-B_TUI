@@ -105,6 +105,20 @@ route_base = "https://api.airplanes.live"
 route_mode = "routeset"
 ```
 
+**Dynamic point query for runtime zoom/pan:**
+
+```toml
+url_template = "https://api.airplanes.live/v2/point/{lat}/{lon}/{range_nm}"
+site_lat = 40.7128
+site_lon = -74.0060
+radar_range_nm = 250
+refresh_secs = 2
+route_base = "https://api.airplanes.live"
+route_mode = "routeset"
+```
+
+Press `+`/`-` to change `{range_nm}` and `Shift` + arrow keys to update `{lat}` and `{lon}`.
+
 Routes default to airplanes.live. To fall back to adsb.lol, set `route_base = "https://api.adsb.lol"`.
 
 ### ADS-B Exchange API

@@ -1,6 +1,6 @@
 [package]
 name = "adsb-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["ADS-B TUI Contributors"]
 description = "A modern terminal user interface for tracking aircraft using ADS-B data"

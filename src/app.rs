@@ -44,6 +44,7 @@ impl SortMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    QuitConfirm,
     Filter,
     Columns,
     Help,
@@ -249,6 +250,20 @@ pub struct SiteLocation {
     pub alt_m: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadarCenter {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RadarDirection {
+    North,
+    South,
+    East,
+    West,
+}
+
 #[derive(Clone, Debug)]
 pub struct Notification {
     pub message: String,
@@ -295,6 +310,14 @@ struct Metrics {
 }
 
 #[derive(Clone, Copy, Debug)]
+struct RadarNavPoint {
+    row: usize,
+    x: f64,
+    y: f64,
+    center_dist_sq: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct PerformanceSample {
     pub msg_rate: Option<f64>,
     pub flights: usize,
@@ -314,6 +337,7 @@ pub struct PerformanceSnapshot {
 
 pub struct App {
     pub(crate) url: String,
+    pub(crate) feed_templates: Vec<String>,
     pub(crate) refresh: Duration,
     pub(crate) data: ApiResponse,
     raw_data: ApiResponse,
@@ -337,6 +361,7 @@ pub struct App {
     pub(crate) filter: String,
     pub(crate) filter_edit: String,
     pub(crate) input_mode: InputMode,
+    previous_input_mode: Option<InputMode>,
     pub(crate) layout_mode: LayoutMode,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) role_enabled: bool,
@@ -351,9 +376,11 @@ pub struct App {
     pub(crate) config_editing: bool,
     pub(crate) config_dirty: bool,
     pub(crate) config_status: Option<(String, SystemTime)>,
+    pub(crate) help_scroll: usize,
     pub(crate) watchlist_cursor: usize,
     pub(crate) trail_len: usize,
     pub(crate) site: Option<SiteLocation>,
+    pub(crate) radar_center: Option<RadarCenter>,
     pub(crate) demo_mode: bool,
     pub(crate) radar_range_nm: f64,
     pub(crate) radar_aspect: f64,
@@ -422,6 +449,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         url: String,
+        feed_templates: Vec<String>,
         refresh: Duration,
         stale_secs: f64,
         hide_stale: bool,
@@ -480,8 +508,13 @@ impl App {
             let refresh_secs = refresh.as_secs_f64().max(0.1);
             ((300.0 / refresh_secs) as usize).clamp(60, 300)
         };
+        let radar_center = site.map(|site| RadarCenter {
+            lat: site.lat,
+            lon: site.lon,
+        });
         Self {
             url,
+            feed_templates,
             refresh,
             data: ApiResponse::default(),
             raw_data: ApiResponse::default(),
@@ -505,6 +538,7 @@ impl App {
             filter,
             filter_edit: String::new(),
             input_mode: InputMode::Normal,
+            previous_input_mode: None,
             layout_mode,
             theme_mode,
             role_enabled,
@@ -523,9 +557,11 @@ impl App {
             config_editing: false,
             config_dirty: false,
             config_status: None,
+            help_scroll: 0,
             watchlist_cursor: 0,
             trail_len: trail_len.max(1),
             site,
+            radar_center,
             demo_mode,
             radar_range_nm: radar_range_nm.max(1.0),
             radar_aspect: radar_aspect.max(0.2),
@@ -709,6 +745,57 @@ impl App {
         );
     }
 
+    pub fn radar_center(&self) -> Option<RadarCenter> {
+        self.radar_center
+    }
+
+    pub fn zoom_radar(&mut self, factor: f64) -> Option<Vec<String>> {
+        if factor <= 0.0 {
+            return None;
+        }
+        self.radar_range_nm = (self.radar_range_nm * factor).max(1.0);
+        self.refresh_feed_urls()
+    }
+
+    pub fn pan_radar(&mut self, direction: RadarDirection) -> Option<Vec<String>> {
+        let center = self.ensure_radar_center()?;
+        let distance_nm = self.radar_range_nm.max(1.0) * 0.25;
+        self.radar_center = Some(offset_center(center, direction, distance_nm));
+        self.refresh_feed_urls()
+    }
+
+    pub fn refresh_feed_urls(&mut self) -> Option<Vec<String>> {
+        if self.feed_templates.is_empty() {
+            return None;
+        }
+        let center = self.radar_center?;
+        let urls = config::render_url_templates(
+            &self.feed_templates,
+            center.lat,
+            center.lon,
+            self.radar_range_nm.max(1.0),
+        );
+        if let Some(first) = urls.first() {
+            self.url = first.clone();
+            Some(urls)
+        } else {
+            None
+        }
+    }
+
+    pub fn open_quit_confirm(&mut self) {
+        if self.input_mode != InputMode::QuitConfirm {
+            self.previous_input_mode = Some(self.input_mode);
+            self.input_mode = InputMode::QuitConfirm;
+            debug!("open quit confirmation");
+        }
+    }
+
+    pub fn close_quit_confirm(&mut self) {
+        self.input_mode = self.previous_input_mode.take().unwrap_or(InputMode::Normal);
+        debug!("close quit confirmation");
+    }
+
     pub fn open_columns(&mut self) {
         self.input_mode = InputMode::Columns;
         debug!("open columns");
@@ -720,6 +807,7 @@ impl App {
     }
 
     pub fn open_help(&mut self) {
+        self.help_scroll = 0;
         self.input_mode = InputMode::Help;
         debug!("open help");
     }
@@ -727,6 +815,14 @@ impl App {
     pub fn close_help(&mut self) {
         self.input_mode = InputMode::Normal;
         debug!("close help");
+    }
+
+    pub fn help_scroll_up(&mut self, amount: usize) {
+        self.help_scroll = self.help_scroll.saturating_sub(amount);
+    }
+
+    pub fn help_scroll_down(&mut self, amount: usize) {
+        self.help_scroll = self.help_scroll.saturating_add(amount);
     }
 
     pub fn open_legend(&mut self) {
@@ -1207,6 +1303,56 @@ impl App {
         self.table_state.select(Some(prev));
     }
 
+    pub fn select_radar_direction(&mut self, indices: &[usize], direction: RadarDirection) -> bool {
+        let Some(center) = self.radar_navigation_center(indices) else {
+            return false;
+        };
+        let range_nm = self.radar_range_nm.max(1.0);
+        let candidates = self.radar_navigation_points(indices, center, range_nm);
+        if candidates.is_empty() {
+            return false;
+        }
+
+        let current_row = self.table_state.selected();
+        let current = current_row.and_then(|row| {
+            candidates
+                .iter()
+                .find(|candidate| candidate.row == row)
+                .copied()
+        });
+
+        let Some(current) = current else {
+            if let Some(nearest) = candidates.iter().min_by(|a, b| {
+                a.center_dist_sq
+                    .partial_cmp(&b.center_dist_sq)
+                    .unwrap_or(Ordering::Equal)
+            }) {
+                self.table_state.select(Some(nearest.row));
+                self.update_selection_key(indices);
+                return true;
+            }
+            return false;
+        };
+
+        let next = candidates
+            .iter()
+            .filter(|candidate| candidate.row != current.row)
+            .filter(|candidate| radar_candidate_in_direction(current, **candidate, direction))
+            .min_by(|a, b| {
+                radar_candidate_distance(current, **a)
+                    .partial_cmp(&radar_candidate_distance(current, **b))
+                    .unwrap_or(Ordering::Equal)
+            });
+
+        if let Some(next) = next {
+            self.table_state.select(Some(next.row));
+            self.update_selection_key(indices);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn clamp_selection_to(&mut self, visible_len: usize) {
         if visible_len == 0 {
             self.table_state.select(None);
@@ -1263,6 +1409,78 @@ impl App {
                 }
             }
         }
+    }
+
+    fn ensure_radar_center(&mut self) -> Option<RadarCenter> {
+        if self.radar_center.is_none() {
+            self.radar_center = self.aircraft_centroid();
+        }
+        self.radar_center
+    }
+
+    fn radar_navigation_center(&self, indices: &[usize]) -> Option<RadarCenter> {
+        self.radar_center
+            .or_else(|| self.aircraft_centroid_for(indices))
+    }
+
+    fn aircraft_centroid(&self) -> Option<RadarCenter> {
+        let indices: Vec<usize> = (0..self.data.aircraft.len()).collect();
+        self.aircraft_centroid_for(&indices)
+    }
+
+    fn aircraft_centroid_for(&self, indices: &[usize]) -> Option<RadarCenter> {
+        let mut sum_lat = 0.0;
+        let mut sum_lon = 0.0;
+        let mut count = 0usize;
+        for idx in indices {
+            let Some(ac) = self.data.aircraft.get(*idx) else {
+                continue;
+            };
+            if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
+                sum_lat += lat;
+                sum_lon += lon;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            None
+        } else {
+            Some(RadarCenter {
+                lat: sum_lat / count as f64,
+                lon: sum_lon / count as f64,
+            })
+        }
+    }
+
+    fn radar_navigation_points(
+        &self,
+        indices: &[usize],
+        center: RadarCenter,
+        range_nm: f64,
+    ) -> Vec<RadarNavPoint> {
+        let mut points = Vec::new();
+        for (row, idx) in indices.iter().enumerate() {
+            let Some(ac) = self.data.aircraft.get(*idx) else {
+                continue;
+            };
+            let (Some(lat), Some(lon)) = (ac.lat, ac.lon) else {
+                continue;
+            };
+            let dist = distance_nm(center.lat, center.lon, lat, lon);
+            if dist > range_nm {
+                continue;
+            }
+            let bearing = bearing_deg(center.lat, center.lon, lat, lon).to_radians();
+            let x = dist * bearing.sin();
+            let y = dist * bearing.cos();
+            points.push(RadarNavPoint {
+                row,
+                x,
+                y,
+                center_dist_sq: x * x + y * y,
+            });
+        }
+        points
     }
 
     pub fn visible_indices(&self) -> Vec<usize> {
@@ -2648,6 +2866,77 @@ fn distance_mi(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     r_mi * c
 }
 
+fn distance_nm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    distance_mi(lat1, lon1, lat2, lon2) / 1.15078
+}
+
+fn bearing_deg(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let lat1 = lat1.to_radians();
+    let lat2 = lat2.to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+    let y = dlon.sin() * lat2.cos();
+    let x = lat1.cos() * lat2.sin() - lat1.sin() * lat2.cos() * dlon.cos();
+    let mut deg = y.atan2(x).to_degrees();
+    if deg < 0.0 {
+        deg += 360.0;
+    }
+    deg
+}
+
+fn offset_center(center: RadarCenter, direction: RadarDirection, distance_nm: f64) -> RadarCenter {
+    let lat_step = distance_nm / 60.0;
+    let lon_step = longitude_step(center.lat, distance_nm);
+    let (lat, lon) = match direction {
+        RadarDirection::North => (center.lat + lat_step, center.lon),
+        RadarDirection::South => (center.lat - lat_step, center.lon),
+        RadarDirection::East => (center.lat, center.lon + lon_step),
+        RadarDirection::West => (center.lat, center.lon - lon_step),
+    };
+    RadarCenter {
+        lat: clamp_lat(lat),
+        lon: wrap_lon(lon),
+    }
+}
+
+fn longitude_step(lat: f64, distance_nm: f64) -> f64 {
+    let cos_lat = lat.to_radians().cos().abs().max(0.01);
+    distance_nm / (60.0 * cos_lat)
+}
+
+fn clamp_lat(lat: f64) -> f64 {
+    lat.clamp(-89.999999, 89.999999)
+}
+
+fn wrap_lon(lon: f64) -> f64 {
+    let mut wrapped = ((lon + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
+    if wrapped == -180.0 {
+        wrapped = 180.0;
+    }
+    wrapped
+}
+
+fn radar_candidate_in_direction(
+    current: RadarNavPoint,
+    candidate: RadarNavPoint,
+    direction: RadarDirection,
+) -> bool {
+    let dx = candidate.x - current.x;
+    let dy = candidate.y - current.y;
+    let epsilon = 0.000001;
+    match direction {
+        RadarDirection::North => dy > epsilon,
+        RadarDirection::South => dy < -epsilon,
+        RadarDirection::East => dx > epsilon,
+        RadarDirection::West => dx < -epsilon,
+    }
+}
+
+fn radar_candidate_distance(current: RadarNavPoint, candidate: RadarNavPoint) -> f64 {
+    let dx = candidate.x - current.x;
+    let dy = candidate.y - current.y;
+    dx * dx + dy * dy
+}
+
 fn merge_api_response(target: &mut ApiResponse, prev: &ApiResponse) {
     if target.now.is_none() {
         target.now = prev.now;
@@ -2969,8 +3258,8 @@ fn toml_value_to_edit(value: Value) -> Option<toml_edit::Value> {
 mod tests {
     use super::{
         compare_f64, compare_i64, distance_mi, load_config_items, parse_config_value,
-        watch_entry_matches, AircraftRole, App, PerformanceSample, RadarBlip, RadarRenderer,
-        RouteInfo, TrendDir, WatchEntry,
+        watch_entry_matches, AircraftRole, App, InputMode, PerformanceSample, RadarBlip,
+        RadarCenter, RadarDirection, RadarRenderer, RouteInfo, TrendDir, WatchEntry,
     };
     use crate::config::ConfigKind;
     use crate::model::Aircraft;
@@ -2990,9 +3279,19 @@ mod tests {
         }
     }
 
+    fn positioned_aircraft(hex: &str, lat: f64, lon: f64) -> Aircraft {
+        Aircraft {
+            hex: Some(hex.to_string()),
+            lat: Some(lat),
+            lon: Some(lon),
+            ..Aircraft::default()
+        }
+    }
+
     fn make_app(role_enabled: bool, role_highlight: bool) -> App {
         App::new(
             "http://example".to_string(),
+            Vec::new(),
             Duration::from_secs(1),
             60.0,
             false,
@@ -3151,6 +3450,7 @@ mod tests {
 
         let app = App::new(
             "http://example".to_string(),
+            Vec::new(),
             Duration::from_secs(1),
             60.0,
             false,
@@ -3238,6 +3538,18 @@ mod tests {
     }
 
     #[test]
+    fn quit_confirmation_restores_previous_mode() {
+        let mut app = make_app(true, true);
+        app.input_mode = InputMode::Help;
+
+        app.open_quit_confirm();
+        assert_eq!(app.input_mode, InputMode::QuitConfirm);
+
+        app.close_quit_confirm();
+        assert_eq!(app.input_mode, InputMode::Help);
+    }
+
+    #[test]
     fn role_enabled_classifies_military() {
         let mut ac = sample_aircraft();
         ac.flight = Some("RCH123".to_string());
@@ -3313,6 +3625,116 @@ mod tests {
     fn distance_same_point_is_zero() {
         let dist = distance_mi(26.0, -80.0, 26.0, -80.0);
         assert!(dist.abs() < 0.0001);
+    }
+
+    #[test]
+    fn radar_zoom_updates_range_and_feed_url() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter {
+            lat: 26.0,
+            lon: -80.0,
+        });
+        app.radar_range_nm = 100.0;
+        app.feed_templates = vec!["https://example.test/{lat}/{lon}/{range_nm}".to_string()];
+
+        let urls = app.zoom_radar(0.8).unwrap();
+
+        assert_eq!(app.radar_range_nm, 80.0);
+        assert_eq!(urls, vec!["https://example.test/26.000000/-80.000000/80"]);
+        assert_eq!(app.url, "https://example.test/26.000000/-80.000000/80");
+    }
+
+    #[test]
+    fn radar_pan_moves_center_and_wraps_longitude() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter {
+            lat: 0.0,
+            lon: 179.8,
+        });
+        app.radar_range_nm = 120.0;
+        app.feed_templates = vec!["https://example.test/{lat}/{lon}/{zoom}".to_string()];
+
+        let urls = app.pan_radar(RadarDirection::East).unwrap();
+        let center = app.radar_center.unwrap();
+
+        assert!((center.lat - 0.0).abs() < 0.000001);
+        assert!((center.lon + 179.7).abs() < 0.000001);
+        assert_eq!(urls, vec!["https://example.test/0.000000/-179.700000/120"]);
+    }
+
+    #[test]
+    fn radar_pan_clamps_latitude() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter {
+            lat: 89.95,
+            lon: 10.0,
+        });
+        app.radar_range_nm = 120.0;
+
+        app.pan_radar(RadarDirection::North);
+
+        assert_eq!(app.radar_center.unwrap().lat, 89.999999);
+    }
+
+    #[test]
+    fn radar_direction_selection_picks_nearest_cardinal_targets() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter { lat: 0.0, lon: 0.0 });
+        app.radar_range_nm = 50.0;
+        app.data.aircraft = vec![
+            positioned_aircraft("center", 0.0, 0.0),
+            positioned_aircraft("north", 0.1, 0.0),
+            positioned_aircraft("south", -0.1, 0.0),
+            positioned_aircraft("east", 0.0, 0.1),
+            positioned_aircraft("west", 0.0, -0.1),
+        ];
+        let indices: Vec<usize> = (0..app.data.aircraft.len()).collect();
+        app.table_state.select(Some(0));
+
+        assert!(app.select_radar_direction(&indices, RadarDirection::East));
+        assert_eq!(app.table_state.selected(), Some(3));
+        assert!(app.select_radar_direction(&indices, RadarDirection::West));
+        assert_eq!(app.table_state.selected(), Some(0));
+        assert!(app.select_radar_direction(&indices, RadarDirection::North));
+        assert_eq!(app.table_state.selected(), Some(1));
+        assert!(app.select_radar_direction(&indices, RadarDirection::South));
+        assert_eq!(app.table_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn radar_direction_selection_falls_back_to_nearest_plotted_aircraft() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter { lat: 0.0, lon: 0.0 });
+        app.radar_range_nm = 50.0;
+        app.data.aircraft = vec![
+            Aircraft {
+                hex: Some("nopos".to_string()),
+                ..Aircraft::default()
+            },
+            positioned_aircraft("near", 0.05, 0.0),
+            positioned_aircraft("far", 0.0, 0.2),
+        ];
+        let indices: Vec<usize> = (0..app.data.aircraft.len()).collect();
+        app.table_state.select(Some(0));
+
+        assert!(app.select_radar_direction(&indices, RadarDirection::East));
+        assert_eq!(app.table_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn radar_direction_selection_keeps_selection_without_candidate() {
+        let mut app = make_app(true, true);
+        app.radar_center = Some(RadarCenter { lat: 0.0, lon: 0.0 });
+        app.radar_range_nm = 50.0;
+        app.data.aircraft = vec![
+            positioned_aircraft("center", 0.0, 0.0),
+            positioned_aircraft("east", 0.0, 0.1),
+        ];
+        let indices: Vec<usize> = (0..app.data.aircraft.len()).collect();
+        app.table_state.select(Some(1));
+
+        assert!(!app.select_radar_direction(&indices, RadarDirection::East));
+        assert_eq!(app.table_state.selected(), Some(1));
     }
 
     #[test]
