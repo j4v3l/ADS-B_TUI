@@ -18,6 +18,10 @@ Create a file named `adsb-tui.toml` with your settings:
 # ADS-B data source URL (required)
 url = "http://your-adsb-receiver:8080/data/aircraft.json"
 
+# Optional dynamic point-feed template. Runtime zoom/pan controls replace
+# {lat}, {lon}, and {range_nm}; {range} and {zoom} are aliases for range_nm.
+# url_template = "https://api.airplanes.live/v2/point/{lat}/{lon}/{range_nm}"
+
 # Refresh interval in seconds (0 = fast refresh, clamped to 200ms)
 refresh_secs = 1
 
@@ -35,6 +39,8 @@ allow_http = true
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `url` | string | *required* | URL of your ADS-B data source |
+| `url_template` | string | unset | Dynamic point-feed URL template using `{lat}`, `{lon}`, and `{range_nm}` |
+| `url_templates` | array | unset | Dynamic fallback URL templates; takes precedence over `url_template` |
 | `refresh_secs` | number | 2 | How often to fetch new data (0 = fast refresh, clamped to 200ms) |
 | `insecure` | boolean | false | Allow self-signed SSL certificates |
 | `allow_http` | boolean | true | Allow http:// URLs |
@@ -190,6 +196,9 @@ You can override configuration values using command line arguments:
 # Override URL and refresh rate
 adsb-tui --url "http://example.com/data.json" --allow-http --refresh-secs 5
 
+# Use a dynamic point feed controlled by radar zoom/pan keys
+adsb-tui --url-template "https://api.airplanes.live/v2/point/{lat}/{lon}/{range_nm}" --site-lat 40.7128 --site-lon -74.0060
+
 # Enable debug logging to file
 adsb-tui --log --log-level debug --log-file adsb-tui.log
 
@@ -204,8 +213,10 @@ adsb-tui --config my-config.toml
 
 ADS-B TUI respects some environment variables:
 
-- `ADSBTUI_CONFIG` - Path to configuration file
-- `ADSBTUI_URL` - Data source URL (overrides config)
+- `ADSB_CONFIG` - Path to configuration file
+- `ADSB_URL` - Data source URL (overrides config)
+- `ADSB_URL_TEMPLATE` - Dynamic point-feed URL template
+- `ADSB_URL_TEMPLATES` - Comma-separated dynamic fallback URL templates
 - `RUST_LOG` - Logging level (for debugging)
 
 ## Troubleshooting

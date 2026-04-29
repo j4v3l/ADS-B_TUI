@@ -73,6 +73,7 @@ struct RadarPoint {
     track: Option<f64>,
     fav: bool,
     current: bool,
+    selected: bool,
     seen_secs: Option<f64>,
 }
 
@@ -111,15 +112,16 @@ fn collect_data(
         track: Option<f64>,
         fav: bool,
         current: bool,
+        selected: bool,
         seen_secs: Option<f64>,
         label: Option<LabelInfo>,
     }
 
-    let selected_id = app
+    let selected_idx = app
         .table_state
         .selected()
         .and_then(|row| indices.get(row))
-        .and_then(|idx| label_info(&app.data.aircraft[*idx]).map(|info| info.id));
+        .copied();
 
     let mut sum_lat = 0.0;
     let mut sum_lon = 0.0;
@@ -128,6 +130,7 @@ fn collect_data(
 
     for idx in indices {
         let ac = &app.data.aircraft[*idx];
+        let selected = selected_idx == Some(*idx);
         if let (Some(lat), Some(lon)) = (ac.lat, ac.lon) {
             let label = if collect_labels { label_info(ac) } else { None };
             raw_points.push(RawPoint {
@@ -136,6 +139,7 @@ fn collect_data(
                 track: ac.track,
                 fav: app.is_favorite(ac),
                 current: true,
+                selected,
                 seen_secs: seen_seconds(ac),
                 label,
             });
@@ -151,6 +155,7 @@ fn collect_data(
                     track: None,
                     fav: app.is_favorite(ac),
                     current: false,
+                    selected: false,
                     seen_secs: None,
                     label: None,
                 });
@@ -162,13 +167,14 @@ fn collect_data(
         return None;
     }
 
-    let (center_lat, center_lon) = match app.site() {
-        Some(site) => (site.lat, site.lon),
-        None => (
+    let (center_lat, center_lon) = app
+        .radar_center()
+        .map(|center| (center.lat, center.lon))
+        .or_else(|| app.site().map(|site| (site.lat, site.lon)))
+        .unwrap_or((
             sum_lat / current_points as f64,
             sum_lon / current_points as f64,
-        ),
-    };
+        ));
 
     let range_nm = range_nm.max(MIN_RANGE_NM);
     let mut points = Vec::with_capacity(raw_points.len());
@@ -187,15 +193,12 @@ fn collect_data(
             track: raw.track,
             fav: raw.fav,
             current: raw.current,
+            selected: raw.selected,
             seen_secs: raw.seen_secs,
         });
         if collect_labels {
             if let Some(info) = raw.label {
                 let fresh = raw.seen_secs.map(|s| s <= 1.0).unwrap_or(false);
-                let selected = selected_id
-                    .as_ref()
-                    .map(|id| id == &info.id)
-                    .unwrap_or(false);
                 labels.push(RadarLabel {
                     x,
                     y,
@@ -204,7 +207,7 @@ fn collect_data(
                     dist,
                     fav: raw.fav,
                     fresh,
-                    selected,
+                    selected: raw.selected,
                 });
             }
         }
@@ -223,7 +226,7 @@ fn collect_data(
 fn render_empty(f: &mut Frame, area: Rect, theme: RadarTheme) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .title("RADAR");
     let paragraph = Paragraph::new(vec![TextLine::from(Span::styled(
         "No position data",
@@ -256,11 +259,14 @@ fn render_canvas(
     let mut current = Vec::new();
     let mut current_fresh = Vec::new();
     let mut current_fav = Vec::new();
+    let mut current_selected = Vec::new();
 
     for point in &data.points {
         let coord = (point.x, point.y);
         if point.current {
-            if point.fav {
+            if point.selected {
+                current_selected.push(coord);
+            } else if point.fav {
                 current_fav.push(coord);
             } else if point.seen_secs.map(|s| s <= 1.0).unwrap_or(false) {
                 current_fresh.push(coord);
@@ -276,7 +282,7 @@ fn render_canvas(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .title("RADAR");
     let canvas = Canvas::default()
         .block(block)
@@ -348,10 +354,16 @@ fn render_canvas(
                             color: theme.fav,
                         });
                     }
+                    if !current_selected.is_empty() {
+                        ctx.draw(&Points {
+                            coords: &current_selected,
+                            color: theme.highlight,
+                        });
+                    }
                 }
                 _ => {
                     for point in &data.points {
-                        if !point.current {
+                        if !point.current || point.selected {
                             continue;
                         }
                         let color = if point.fav {
@@ -423,9 +435,25 @@ fn render_canvas(
                     );
                 }
             }
+            for point in &data.points {
+                if !point.current || !point.selected {
+                    continue;
+                }
+                let glyph = selected_blip_glyph(settings.blip, point.track);
+                ctx.print(
+                    point.x,
+                    point.y,
+                    TextLine::from(Span::styled(
+                        glyph.to_string(),
+                        Style::default()
+                            .fg(theme.highlight)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                );
+            }
             if let Some(selection) = &data.selection {
                 if let Some((x, y)) = selection.position {
-                    let marker = (range * 0.02).clamp(0.5, 6.0);
+                    let marker = (range * 0.025).clamp(0.75, 6.0);
                     ctx.draw(&Circle {
                         x,
                         y,
@@ -481,12 +509,7 @@ fn render_ascii(f: &mut Frame, area: Rect, data: &RadarData, theme: RadarTheme) 
         let y = ((1.0 - (dy + 1.0) * 0.5) * (height.saturating_sub(1)) as f64) as isize;
         let xi = x.clamp(0, width.saturating_sub(1) as isize) as usize;
         let yi = y.clamp(0, height.saturating_sub(1) as isize) as usize;
-        let (ch, prio) = match (point.fav, point.current) {
-            (true, true) => ('F', 4),
-            (false, true) => ('*', 3),
-            (true, false) => ('f', 2),
-            (false, false) => ('o', 1),
-        };
+        let (ch, prio) = ascii_point_marker(point);
         set_grid(&mut grid, xi, yi, ch, prio);
     }
 
@@ -513,7 +536,7 @@ fn render_ascii(f: &mut Frame, area: Rect, data: &RadarData, theme: RadarTheme) 
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .title("RADAR");
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -592,6 +615,25 @@ fn blip_glyph(style: RadarBlip, track: Option<f64>) -> &'static str {
         RadarBlip::Plane => track.map(direction_glyph).unwrap_or("✈"),
         RadarBlip::Block => "■",
         RadarBlip::Dot => "•",
+    }
+}
+
+fn selected_blip_glyph(style: RadarBlip, track: Option<f64>) -> &'static str {
+    match style {
+        RadarBlip::Dot => "◆",
+        _ => blip_glyph(style, track),
+    }
+}
+
+fn ascii_point_marker(point: &RadarPoint) -> (char, u8) {
+    if point.selected {
+        return ('X', 5);
+    }
+    match (point.fav, point.current) {
+        (true, true) => ('F', 4),
+        (false, true) => ('*', 3),
+        (true, false) => ('f', 2),
+        (false, false) => ('o', 1),
     }
 }
 
@@ -726,9 +768,12 @@ fn selected_aircraft(
         let y = dist * bearing.cos();
         if dist <= range_nm {
             position = Some((x, y));
+        } else {
+            lines.push("RADAR    OUT OF RANGE".to_string());
         }
     } else {
         lines.push("RNG/BRG  -- / --".to_string());
+        lines.push("RADAR    NO POSITION".to_string());
     }
 
     let alt = ac.alt_baro.or(ac.alt_geom);
@@ -757,6 +802,71 @@ fn selected_aircraft(
 mod tests {
     use super::*;
     use crate::model::Aircraft;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    fn make_app() -> App {
+        App::new(
+            "http://example".to_string(),
+            Vec::new(),
+            Duration::from_secs(1),
+            60.0,
+            false,
+            5,
+            8,
+            HashSet::new(),
+            String::new(),
+            LayoutMode::Radar,
+            crate::app::ThemeMode::Default,
+            true,
+            true,
+            true,
+            Duration::from_millis(400),
+            PathBuf::from("adsb-tui.toml"),
+            3,
+            None,
+            None,
+            false,
+            50.0,
+            1.0,
+            RadarRenderer::Canvas,
+            false,
+            RadarBlip::Dot,
+            false,
+            false,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            1,
+            10,
+            true,
+            true,
+            Duration::from_millis(300),
+            0.2,
+            10.0,
+            0.5,
+            Duration::from_secs(60),
+            true,
+            true,
+            true,
+            crate::app::FlagStyle::Emoji,
+            "msg_rate_total".to_string(),
+            "kbps_total".to_string(),
+            "msg_rate_avg".to_string(),
+            true,
+            Some(PathBuf::from("adsb-watchlist.toml")),
+            Vec::new(),
+        )
+    }
+
+    fn positioned_aircraft(hex: &str, lat: f64, lon: f64) -> Aircraft {
+        Aircraft {
+            hex: Some(hex.to_string()),
+            lat: Some(lat),
+            lon: Some(lon),
+            ..Aircraft::default()
+        }
+    }
 
     #[test]
     fn direction_glyph_maps_cardinals() {
@@ -811,5 +921,59 @@ mod tests {
     fn blip_glyph_plane_uses_heading() {
         assert_eq!(blip_glyph(RadarBlip::Plane, Some(90.0)), "→");
         assert_eq!(blip_glyph(RadarBlip::Plane, None), "✈");
+    }
+
+    #[test]
+    fn selected_current_aircraft_is_marked_without_labels() {
+        let mut app = make_app();
+        app.radar_center = Some(crate::app::RadarCenter { lat: 0.0, lon: 0.0 });
+        app.data.aircraft = vec![
+            positioned_aircraft("north", 0.1, 0.0),
+            positioned_aircraft("east", 0.0, 0.1),
+        ];
+        app.table_state.select(Some(1));
+        let indices = vec![0, 1];
+
+        let data = collect_data(&app, &indices, 50.0, false).expect("radar data");
+        let selected: Vec<_> = data.points.iter().filter(|point| point.selected).collect();
+
+        assert_eq!(selected.len(), 1);
+        assert!(selected[0].current);
+        assert!(selected[0].x > 0.0);
+        assert!(data.labels.is_empty());
+    }
+
+    #[test]
+    fn out_of_range_selection_has_panel_status_without_plotted_point() {
+        let mut app = make_app();
+        app.radar_center = Some(crate::app::RadarCenter { lat: 0.0, lon: 0.0 });
+        app.data.aircraft = vec![positioned_aircraft("far", 1.0, 0.0)];
+        app.table_state.select(Some(0));
+        let indices = vec![0];
+
+        let data = collect_data(&app, &indices, 5.0, true).expect("radar data");
+        let selection = data.selection.expect("selected aircraft");
+
+        assert!(selection.position.is_none());
+        assert!(selection
+            .lines
+            .iter()
+            .any(|line| line == "RADAR    OUT OF RANGE"));
+        assert!(data.points.iter().all(|point| !point.selected));
+    }
+
+    #[test]
+    fn ascii_marker_prioritizes_selected_aircraft() {
+        let point = RadarPoint {
+            x: 0.0,
+            y: 0.0,
+            track: None,
+            fav: false,
+            current: true,
+            selected: true,
+            seen_secs: None,
+        };
+
+        assert_eq!(ascii_point_marker(&point), ('X', 5));
     }
 }

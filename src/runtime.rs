@@ -13,7 +13,7 @@ use std::io::{self, Stdout};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, SystemTime};
 
-use crate::app::{App, InputMode, LayoutMode};
+use crate::app::{App, InputMode, LayoutMode, RadarDirection};
 use crate::export;
 use crate::lookup::{LookupMessage, LookupRequest};
 use crate::model::ApiResponse;
@@ -49,6 +49,7 @@ pub fn run_app(
     rx: Receiver<Result<ApiResponse, String>>,
     routes: Option<RouteChannels>,
     lookup: Option<LookupChannels>,
+    feed_updates: Option<Sender<Vec<String>>>,
 ) -> Result<()> {
     let tick_rate = Duration::from_millis(50);
     info!("runtime loop started");
@@ -110,7 +111,31 @@ pub fn run_app(
             match event::read()? {
                 Event::Key(key) => match app.input_mode {
                     InputMode::Normal => match key.code {
-                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('q') => app.open_quit_confirm(),
+                        KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            send_feed_update(&feed_updates, app.pan_radar(RadarDirection::North));
+                        }
+                        KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            send_feed_update(&feed_updates, app.pan_radar(RadarDirection::South));
+                        }
+                        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            send_feed_update(&feed_updates, app.pan_radar(RadarDirection::West));
+                        }
+                        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            send_feed_update(&feed_updates, app.pan_radar(RadarDirection::East));
+                        }
+                        KeyCode::Up if app.layout_mode == LayoutMode::Radar => {
+                            app.select_radar_direction(&indices, RadarDirection::North);
+                        }
+                        KeyCode::Down if app.layout_mode == LayoutMode::Radar => {
+                            app.select_radar_direction(&indices, RadarDirection::South);
+                        }
+                        KeyCode::Left if app.layout_mode == LayoutMode::Radar => {
+                            app.select_radar_direction(&indices, RadarDirection::West);
+                        }
+                        KeyCode::Right if app.layout_mode == LayoutMode::Radar => {
+                            app.select_radar_direction(&indices, RadarDirection::East);
+                        }
                         KeyCode::Down => {
                             app.next_row(indices.len());
                             app.update_selection_key(&indices);
@@ -122,16 +147,7 @@ pub fn run_app(
                         KeyCode::Char('s') => app.toggle_sort(),
                         KeyCode::Char('/') => app.start_filter(),
                         KeyCode::Char('c') => app.clear_filter(),
-                        KeyCode::Char('f') => {
-                            if app.toggle_favorite_selected(&indices) {
-                                if let Some(path) = app.favorites_path() {
-                                    match storage::save_favorites(path, &app.favorites) {
-                                        Ok(_) => debug!("favorites saved {}", path.display()),
-                                        Err(err) => error!("favorites save failed: {err}"),
-                                    }
-                                }
-                            }
-                        }
+                        KeyCode::Char('f') => toggle_favorite(&mut app, &indices),
                         KeyCode::Char('t') => app.toggle_theme(),
                         KeyCode::Char('l') => app.toggle_layout(),
                         KeyCode::Char('R') | KeyCode::Char('r') => {
@@ -142,6 +158,12 @@ pub fn run_app(
                         }
                         KeyCode::Char('b') | KeyCode::Char('B') => {
                             app.toggle_radar_labels();
+                        }
+                        KeyCode::Char('+') | KeyCode::Char('=') => {
+                            send_feed_update(&feed_updates, app.zoom_radar(0.8));
+                        }
+                        KeyCode::Char('-') => {
+                            send_feed_update(&feed_updates, app.zoom_radar(1.25));
                         }
                         KeyCode::Char('m') => app.open_columns(),
                         KeyCode::Char('C') => app.open_config(),
@@ -167,20 +189,26 @@ pub fn run_app(
                         },
                         _ => {}
                     },
+                    InputMode::QuitConfirm => match key.code {
+                        KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(()),
+                        KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                            app.close_quit_confirm();
+                        }
+                        _ => {}
+                    },
                     InputMode::Filter => match key.code {
                         KeyCode::Enter => app.apply_filter(),
                         KeyCode::Esc => app.cancel_filter(),
                         KeyCode::Backspace => app.backspace_filter(),
-                        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if ch == 'u' {
-                                app.filter_edit.clear();
-                            }
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.filter_edit.clear();
                         }
                         KeyCode::Char(ch) => app.push_filter_char(ch),
                         _ => {}
                     },
                     InputMode::Columns => match key.code {
                         KeyCode::Esc => app.close_columns(),
+                        KeyCode::Char('q') => app.open_quit_confirm(),
                         KeyCode::Char('m') => app.close_columns(),
                         KeyCode::Up => app.previous_column(),
                         KeyCode::Down => app.next_column(),
@@ -189,12 +217,18 @@ pub fn run_app(
                     },
                     InputMode::Help => match key.code {
                         KeyCode::Esc => app.close_help(),
+                        KeyCode::Char('q') => app.open_quit_confirm(),
                         KeyCode::Char('?') | KeyCode::Char('h') => app.close_help(),
                         KeyCode::Char('L') | KeyCode::Char('l') => app.open_legend(),
+                        KeyCode::Up => app.help_scroll_up(1),
+                        KeyCode::Down => app.help_scroll_down(1),
+                        KeyCode::PageUp => app.help_scroll_up(5),
+                        KeyCode::PageDown => app.help_scroll_down(5),
                         _ => {}
                     },
                     InputMode::Legend => match key.code {
                         KeyCode::Esc => app.close_legend(),
+                        KeyCode::Char('q') => app.open_quit_confirm(),
                         KeyCode::Char('L') | KeyCode::Char('l') => app.close_legend(),
                         KeyCode::Up => app.previous_cursor(ui::legend_len()),
                         KeyCode::Down => app.next_cursor(ui::legend_len()),
@@ -202,6 +236,7 @@ pub fn run_app(
                     },
                     InputMode::Watchlist => match key.code {
                         KeyCode::Esc => app.close_watchlist(),
+                        KeyCode::Char('q') => app.open_quit_confirm(),
                         KeyCode::Char('W') | KeyCode::Char('w') => app.close_watchlist(),
                         KeyCode::Up => app.previous_watchlist_item(),
                         KeyCode::Down => app.next_watchlist_item(),
@@ -225,50 +260,38 @@ pub fn run_app(
                         _ => {}
                     },
                     InputMode::Config => match key.code {
-                        KeyCode::Esc => {
-                            if app.config_editing {
-                                app.cancel_config_edit();
-                            } else {
-                                app.close_config();
-                            }
+                        KeyCode::Esc if app.config_editing => {
+                            app.cancel_config_edit();
                         }
+                        KeyCode::Esc => app.close_config(),
+                        KeyCode::Char('q') if !app.config_editing => app.open_quit_confirm(),
                         KeyCode::Char('w') | KeyCode::Char('S') => {
                             app.save_config();
                         }
-                        KeyCode::Up => {
-                            if !app.config_editing {
-                                app.previous_config_item();
-                            }
+                        KeyCode::Up if !app.config_editing => {
+                            app.previous_config_item();
                         }
-                        KeyCode::Down => {
-                            if !app.config_editing {
-                                app.next_config_item();
-                            }
+                        KeyCode::Down if !app.config_editing => {
+                            app.next_config_item();
                         }
-                        KeyCode::Enter => {
-                            if app.config_editing {
-                                app.apply_config_edit();
-                            } else {
-                                app.start_config_edit();
-                            }
+                        KeyCode::Enter if app.config_editing => {
+                            app.apply_config_edit();
                         }
-                        KeyCode::Backspace => {
-                            if app.config_editing {
-                                app.backspace_config();
-                            }
+                        KeyCode::Enter => app.start_config_edit(),
+                        KeyCode::Backspace if app.config_editing => {
+                            app.backspace_config();
                         }
-                        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if ch == 'u' && app.config_editing {
-                                app.config_edit.clear();
-                            }
-                            if ch == 's' {
-                                app.save_config();
-                            }
+                        KeyCode::Char('u')
+                            if key.modifiers.contains(KeyModifiers::CONTROL)
+                                && app.config_editing =>
+                        {
+                            app.config_edit.clear();
                         }
-                        KeyCode::Char(ch) => {
-                            if app.config_editing {
-                                app.push_config_char(ch);
-                            }
+                        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.save_config();
+                        }
+                        KeyCode::Char(ch) if app.config_editing => {
+                            app.push_config_char(ch);
                         }
                         _ => {}
                     },
@@ -284,10 +307,8 @@ pub fn run_app(
                             }
                         }
                         KeyCode::Backspace => app.backspace_lookup(),
-                        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if ch == 'u' {
-                                app.lookup_input.clear();
-                            }
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.lookup_input.clear();
                         }
                         KeyCode::Char(ch) => app.push_lookup_char(ch),
                         _ => {}
@@ -344,6 +365,30 @@ fn is_draw_due(now: SystemTime, last_draw: Option<SystemTime>, interval: Duratio
             .map(|d| d >= interval)
             .unwrap_or(true),
         None => true,
+    }
+}
+
+fn send_feed_update(feed_updates: &Option<Sender<Vec<String>>>, urls: Option<Vec<String>>) {
+    let (Some(tx), Some(urls)) = (feed_updates.as_ref(), urls) else {
+        return;
+    };
+    if !urls.is_empty() {
+        let _ = tx.send(urls);
+    }
+}
+
+fn toggle_favorite(app: &mut App, indices: &[usize]) {
+    if !app.toggle_favorite_selected(indices) {
+        return;
+    }
+
+    let Some(path) = app.favorites_path() else {
+        return;
+    };
+
+    match storage::save_favorites(path, &app.favorites) {
+        Ok(_) => debug!("favorites saved {}", path.display()),
+        Err(err) => error!("favorites save failed: {err}"),
     }
 }
 

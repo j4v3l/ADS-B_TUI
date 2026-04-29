@@ -73,7 +73,7 @@ body:
     attributes:
       label: Affected Version
       description: Which version(s) are affected?
-      placeholder: "0.1.0"
+      placeholder: "0.2.0"
 
   - type: textarea
     id: mitigation
