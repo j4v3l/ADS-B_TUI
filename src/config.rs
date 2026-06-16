@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const DEFAULT_URL: &str = "http://adsb.local/data/aircraft.json";
+pub const APP_DIR_NAME: &str = "ads-b-tui";
+pub const DEFAULT_CONFIG_FILE: &str = "adsb-tui.toml";
 pub const DEFAULT_REFRESH_SECS: u64 = 2;
 pub const DEFAULT_STALE_SECS: u64 = 60;
 pub const DEFAULT_HIDE_STALE: bool = false;
@@ -48,6 +50,113 @@ pub const DEFAULT_RADAR_LABELS: bool = false;
 pub const DEFAULT_RADAR_BLIP: &str = "dot";
 pub const DEFAULT_ROLE_ENABLED: bool = true;
 pub const DEFAULT_ROLE_HIGHLIGHT: bool = true;
+
+#[derive(Debug, Clone, Default)]
+struct PathEnv {
+    xdg_config_home: Option<PathBuf>,
+    xdg_data_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+struct ResolvedConfigPath {
+    path: PathBuf,
+    required: bool,
+}
+
+impl PathEnv {
+    fn from_env() -> Self {
+        Self {
+            xdg_config_home: env_path("XDG_CONFIG_HOME"),
+            xdg_data_home: env_path("XDG_DATA_HOME"),
+            home: env_path("HOME"),
+        }
+    }
+}
+
+fn env_path(key: &str) -> Option<PathBuf> {
+    env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn default_config_dir_from_env(paths: &PathEnv) -> PathBuf {
+    paths
+        .xdg_config_home
+        .clone()
+        .or_else(|| paths.home.as_ref().map(|home| home.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join(APP_DIR_NAME)
+}
+
+fn default_data_dir_from_env(paths: &PathEnv) -> PathBuf {
+    paths
+        .xdg_data_home
+        .clone()
+        .or_else(|| paths.home.as_ref().map(|home| home.join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
+        .join(APP_DIR_NAME)
+}
+
+fn default_config_path_from_env(paths: &PathEnv) -> PathBuf {
+    default_config_dir_from_env(paths).join(DEFAULT_CONFIG_FILE)
+}
+
+fn resolve_config_path(
+    explicit_config: Option<PathBuf>,
+    env_config: Option<PathBuf>,
+    paths: &PathEnv,
+    current_dir: &Path,
+) -> ResolvedConfigPath {
+    if let Some(path) = explicit_config {
+        return ResolvedConfigPath {
+            path,
+            required: true,
+        };
+    }
+
+    if let Some(path) = env_config {
+        return ResolvedConfigPath {
+            path,
+            required: false,
+        };
+    }
+
+    let local_config = current_dir.join(DEFAULT_CONFIG_FILE);
+    if local_config.exists() {
+        return ResolvedConfigPath {
+            path: local_config,
+            required: false,
+        };
+    }
+
+    ResolvedConfigPath {
+        path: default_config_path_from_env(paths),
+        required: false,
+    }
+}
+
+fn resolve_data_file_path(path: &str, paths: &PathEnv) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let file_path = PathBuf::from(trimmed);
+    if file_path.is_absolute() {
+        file_path
+    } else {
+        default_data_dir_from_env(paths).join(file_path)
+    }
+    .to_string_lossy()
+    .into_owned()
+}
+
+fn resolve_data_file_paths(config: &mut Config, paths: &PathEnv) {
+    config.favorites_file = resolve_data_file_path(&config.favorites_file, paths);
+    config.watchlist_file = resolve_data_file_path(&config.watchlist_file, paths);
+    config.log_file = resolve_data_file_path(&config.log_file, paths);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfigKind {
@@ -524,11 +633,16 @@ pub fn parse_args() -> Result<Config> {
         }
     }
 
+    let env_paths = PathEnv::from_env();
     let env_config = env::var("ADSB_CONFIG").ok().map(PathBuf::from);
-    let config_path = explicit_config
-        .clone()
-        .or(env_config)
-        .unwrap_or_else(|| PathBuf::from("adsb-tui.toml"));
+    let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let resolved_config = resolve_config_path(
+        explicit_config.clone(),
+        env_config,
+        &env_paths,
+        &current_dir,
+    );
+    let config_path = resolved_config.path;
 
     let mut config = Config {
         url: DEFAULT_URL.to_string(),
@@ -598,7 +712,7 @@ pub fn parse_args() -> Result<Config> {
         if let Some(file_config) = load_file_config(&config_path)? {
             apply_file_config(&mut config, file_config);
         }
-    } else if explicit_config.is_some() {
+    } else if resolved_config.required {
         return Err(anyhow!("Config file not found: {}", config_path.display()));
     }
 
@@ -1192,6 +1306,7 @@ pub fn parse_args() -> Result<Config> {
         }
     }
 
+    resolve_data_file_paths(&mut config, &env_paths);
     normalize_urls(&mut config);
     validate_security(&config)?;
     Ok(config)
@@ -1532,6 +1647,10 @@ fn print_help() {
     println!("       [--flag-style emoji|text|none]");
     println!("       [--alt-arrows] [--no-alt-arrows]");
     println!("       [--stats-metric-1 NAME] [--stats-metric-2 NAME] [--stats-metric-3 NAME]");
+    println!("Config: --config/ADSB_CONFIG override the config path");
+    println!("Config: otherwise reads existing ./adsb-tui.toml, then XDG config");
+    println!("Config: default path is $XDG_CONFIG_HOME/ads-b-tui/adsb-tui.toml");
+    println!("Data: relative favorites, watchlist, and log paths resolve under XDG data");
     println!("Environment: ADSB_URL overrides the primary URL");
     println!("Environment: ADSB_URLS sets comma-separated fallback URLs");
     println!("Environment: ADSB_URL_TEMPLATE/TEMPLATES configure dynamic point feed URLs");
@@ -1539,6 +1658,7 @@ fn print_help() {
     println!("Environment: ADSB_ALLOW_HTTP=1 allows http:// URLs");
     println!("Environment: ADSB_ALLOW_INSECURE=1 allows --insecure");
     println!("Environment: ADSB_CONFIG overrides config path");
+    println!("Environment: XDG_CONFIG_HOME/XDG_DATA_HOME override default config/data roots");
     println!("Environment: ADSB_TRAIL_LEN sets radar trail length");
     println!("Environment: ADSB_HIDE_STALE filters stale aircraft from the table");
     println!("Environment: ADSB_FAVORITES_FILE sets favorites path");
@@ -1596,6 +1716,17 @@ mod tests {
         dir.push(format!("adsb-tui-config-test-{suffix}"));
         let _ = fs::create_dir_all(&dir);
         dir.push(name);
+        dir
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        dir.push(format!("adsb-tui-config-test-{suffix}-{name}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
 
@@ -1713,6 +1844,170 @@ mod tests {
 
         let urls = initial_fetch_urls(&cfg).unwrap();
         assert_eq!(urls, vec!["https://example.test/26.000000/-80.000000/25"]);
+    }
+
+    #[test]
+    fn xdg_config_home_sets_default_config_path() {
+        let xdg_config_home = temp_dir("xdg-config");
+        let home = temp_dir("home");
+        let paths = PathEnv {
+            xdg_config_home: Some(xdg_config_home.clone()),
+            xdg_data_home: None,
+            home: Some(home),
+        };
+
+        assert_eq!(
+            default_config_path_from_env(&paths),
+            xdg_config_home.join(APP_DIR_NAME).join(DEFAULT_CONFIG_FILE)
+        );
+        let _ = fs::remove_dir_all(xdg_config_home);
+    }
+
+    #[test]
+    fn home_sets_default_config_path_when_xdg_config_home_missing() {
+        let home = temp_dir("home");
+        let paths = PathEnv {
+            xdg_config_home: None,
+            xdg_data_home: None,
+            home: Some(home.clone()),
+        };
+
+        assert_eq!(
+            default_config_path_from_env(&paths),
+            home.join(".config")
+                .join(APP_DIR_NAME)
+                .join(DEFAULT_CONFIG_FILE)
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn xdg_data_home_sets_default_data_dir() {
+        let xdg_data_home = temp_dir("xdg-data");
+        let home = temp_dir("home");
+        let paths = PathEnv {
+            xdg_config_home: None,
+            xdg_data_home: Some(xdg_data_home.clone()),
+            home: Some(home),
+        };
+
+        assert_eq!(
+            default_data_dir_from_env(&paths),
+            xdg_data_home.join(APP_DIR_NAME)
+        );
+        let _ = fs::remove_dir_all(xdg_data_home);
+    }
+
+    #[test]
+    fn home_sets_default_data_dir_when_xdg_data_home_missing() {
+        let home = temp_dir("home");
+        let paths = PathEnv {
+            xdg_config_home: None,
+            xdg_data_home: None,
+            home: Some(home.clone()),
+        };
+
+        assert_eq!(
+            default_data_dir_from_env(&paths),
+            home.join(".local/share").join(APP_DIR_NAME)
+        );
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn existing_local_config_wins_over_xdg_default_config() {
+        let current_dir = temp_dir("cwd");
+        let xdg_config_home = temp_dir("xdg-config");
+        let local_config = current_dir.join(DEFAULT_CONFIG_FILE);
+        let xdg_config = xdg_config_home.join(APP_DIR_NAME).join(DEFAULT_CONFIG_FILE);
+        fs::create_dir_all(xdg_config.parent().unwrap()).unwrap();
+        fs::write(&local_config, "url = \"http://local.test/data.json\"\n").unwrap();
+        fs::write(&xdg_config, "url = \"http://xdg.test/data.json\"\n").unwrap();
+        let paths = PathEnv {
+            xdg_config_home: Some(xdg_config_home.clone()),
+            xdg_data_home: None,
+            home: None,
+        };
+
+        let resolved = resolve_config_path(None, None, &paths, &current_dir);
+
+        assert_eq!(resolved.path, local_config);
+        assert!(!resolved.required);
+        let _ = fs::remove_dir_all(current_dir);
+        let _ = fs::remove_dir_all(xdg_config_home);
+    }
+
+    #[test]
+    fn missing_default_config_uses_xdg_path_for_future_saves() {
+        let current_dir = temp_dir("cwd");
+        let xdg_config_home = temp_dir("xdg-config");
+        let paths = PathEnv {
+            xdg_config_home: Some(xdg_config_home.clone()),
+            xdg_data_home: None,
+            home: None,
+        };
+
+        let resolved = resolve_config_path(None, None, &paths, &current_dir);
+
+        assert_eq!(
+            resolved.path,
+            xdg_config_home.join(APP_DIR_NAME).join(DEFAULT_CONFIG_FILE)
+        );
+        assert!(!resolved.required);
+        let _ = fs::remove_dir_all(current_dir);
+        let _ = fs::remove_dir_all(xdg_config_home);
+    }
+
+    #[test]
+    fn relative_data_files_resolve_under_xdg_data_dir() {
+        let xdg_data_home = temp_dir("xdg-data");
+        let paths = PathEnv {
+            xdg_config_home: None,
+            xdg_data_home: Some(xdg_data_home.clone()),
+            home: None,
+        };
+        let mut cfg = base_config();
+        cfg.favorites_file = "favorites.txt".to_string();
+        cfg.watchlist_file = "watch/watchlist.toml".to_string();
+        cfg.log_file = "logs/adsb.log".to_string();
+
+        resolve_data_file_paths(&mut cfg, &paths);
+
+        let data_dir = xdg_data_home.join(APP_DIR_NAME);
+        assert_eq!(
+            PathBuf::from(cfg.favorites_file),
+            data_dir.join("favorites.txt")
+        );
+        assert_eq!(
+            PathBuf::from(cfg.watchlist_file),
+            data_dir.join("watch/watchlist.toml")
+        );
+        assert_eq!(PathBuf::from(cfg.log_file), data_dir.join("logs/adsb.log"));
+        let _ = fs::remove_dir_all(xdg_data_home);
+    }
+
+    #[test]
+    fn absolute_data_file_paths_are_preserved() {
+        let xdg_data_home = temp_dir("xdg-data");
+        let paths = PathEnv {
+            xdg_config_home: None,
+            xdg_data_home: Some(xdg_data_home.clone()),
+            home: None,
+        };
+        let favorites = temp_file("favorites.txt");
+        let watchlist = temp_file("watchlist.toml");
+        let log = temp_file("adsb.log");
+        let mut cfg = base_config();
+        cfg.favorites_file = favorites.to_string_lossy().into_owned();
+        cfg.watchlist_file = watchlist.to_string_lossy().into_owned();
+        cfg.log_file = log.to_string_lossy().into_owned();
+
+        resolve_data_file_paths(&mut cfg, &paths);
+
+        assert_eq!(PathBuf::from(cfg.favorites_file), favorites);
+        assert_eq!(PathBuf::from(cfg.watchlist_file), watchlist);
+        assert_eq!(PathBuf::from(cfg.log_file), log);
+        let _ = fs::remove_dir_all(xdg_data_home);
     }
 
     #[test]

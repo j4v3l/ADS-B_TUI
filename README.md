@@ -67,7 +67,7 @@ cargo build --release
 
 ### Basic Usage
 
-1. **Set up your data source**: Edit `adsb-tui.toml` to point to your ADS-B data URL
+1. **Set up your data source**: Create `adsb-tui.toml` in your config directory and point it to your ADS-B data URL
 2. **Run the application**:
 
    ```bash
@@ -76,7 +76,7 @@ cargo build --release
 
 ## 📖 Configuration
 
-Create an `adsb-tui.toml` file in the same directory as the binary:
+Create an `adsb-tui.toml` file at `$XDG_CONFIG_HOME/ads-b-tui/adsb-tui.toml`, or at `$HOME/.config/ads-b-tui/adsb-tui.toml` when `XDG_CONFIG_HOME` is unset. For compatibility, ADS-B TUI still reads an existing `./adsb-tui.toml` before the XDG config file.
 
 ```toml
 # ADS-B data source URL
@@ -136,6 +136,8 @@ smooth_mode = true
 ```
 
 API keys: prefer `ADSB_API_KEY` / `ADSB_API_KEY_HEADER` env vars; the in-app config editor does not persist `api_key`.
+
+Relative paths for `favorites_file`, `watchlist_file`, and `log_file` are stored under `$XDG_DATA_HOME/ads-b-tui`, or `$HOME/.local/share/ads-b-tui` when `XDG_DATA_HOME` is unset. Use absolute paths to opt out.
 
 ### Configuration Options
 
