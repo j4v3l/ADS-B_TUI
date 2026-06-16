@@ -5,6 +5,14 @@ use std::path::Path;
 
 use crate::watchlist::{WatchEntry, WatchlistFile};
 
+fn ensure_parent_dir(path: &Path, context: &str) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {context} dir: {}", parent.display()))?;
+    }
+    Ok(())
+}
+
 pub fn load_favorites(path: &Path) -> Result<HashSet<String>> {
     if !path.exists() {
         return Ok(HashSet::new());
@@ -25,6 +33,7 @@ pub fn save_favorites(path: &Path, favorites: &HashSet<String>) -> Result<()> {
     let mut list: Vec<String> = favorites.iter().cloned().collect();
     list.sort();
     let content = list.join("\n");
+    ensure_parent_dir(path, "favorites")?;
     fs::write(path, content)
         .with_context(|| format!("Failed to write favorites: {}", path.display()))?;
     Ok(())
@@ -47,6 +56,7 @@ pub fn save_watchlist(path: &Path, entries: &[WatchEntry]) -> Result<()> {
     };
     let content = toml::to_string_pretty(&file)
         .with_context(|| format!("Failed to serialize watchlist: {}", path.display()))?;
+    ensure_parent_dir(path, "watchlist")?;
     fs::write(path, content)
         .with_context(|| format!("Failed to write watchlist: {}", path.display()))?;
     Ok(())
@@ -56,10 +66,7 @@ pub fn ensure_watchlist_file(path: &Path) -> Result<bool> {
     if path.exists() {
         return Ok(false);
     }
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create watchlist dir: {}", parent.display()))?;
-    }
+    ensure_parent_dir(path, "watchlist")?;
     let template = r#"# ADSB-TUI Watchlist
 # Each entry is a [[watchlist]] table.
 # match: hex | callsign | reg | type | owner | category | route

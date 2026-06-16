@@ -6,13 +6,16 @@ This guide explains all configuration options available in ADS-B TUI.
 
 ADS-B TUI looks for configuration in the following locations (in order of priority):
 
-1. `adsb-tui.toml` in the current working directory
-2. `adsb-tui.toml` in the user's config directory
-3. Default values (built into the application)
+1. The path passed with `--config`
+2. The path set with `ADSB_CONFIG`
+3. Existing `adsb-tui.toml` in the current working directory, for compatibility with older installs
+4. `$XDG_CONFIG_HOME/ads-b-tui/adsb-tui.toml`
+5. `$HOME/.config/ads-b-tui/adsb-tui.toml` when `XDG_CONFIG_HOME` is unset
+6. Default values (built into the application)
 
 ## Basic Configuration
 
-Create a file named `adsb-tui.toml` with your settings:
+Create a file named `adsb-tui.toml` in the XDG config directory with your settings:
 
 ```toml
 # ADS-B data source URL (required)
@@ -97,7 +100,11 @@ Default route queries use the airplanes.live routeset endpoint. To fall back to 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `favorites_file` | string | "adsb-favorites.txt" | Path to favorites file |
+| `watchlist_file` | string | "adsb-watchlist.toml" | Path to watchlist file |
+| `log_file` | string | "adsb-tui.log" | Log output file path |
 | `filter` | string | "" | Aircraft filter expression |
+
+Relative `favorites_file`, `watchlist_file`, and `log_file` paths resolve under `$XDG_DATA_HOME/ads-b-tui`, or `$HOME/.local/share/ads-b-tui` when `XDG_DATA_HOME` is unset. Use absolute paths to opt out.
 
 ### UI Layout Settings
 
@@ -131,7 +138,6 @@ Default route queries use the airplanes.live routeset endpoint. To fall back to 
 | `site_alt_m` | number | *required* | Your location altitude in meters |
 | `log_enabled` | boolean | false | Enable logging to file |
 | `log_level` | string | "info" | Logging level (trace/debug/info/warn/error) |
-| `log_file` | string | "adsb-tui.log" | Log output file path |
 
 ## Example Configurations
 
@@ -217,6 +223,8 @@ ADS-B TUI respects some environment variables:
 - `ADSB_URL` - Data source URL (overrides config)
 - `ADSB_URL_TEMPLATE` - Dynamic point-feed URL template
 - `ADSB_URL_TEMPLATES` - Comma-separated dynamic fallback URL templates
+- `XDG_CONFIG_HOME` - Root directory for default config discovery
+- `XDG_DATA_HOME` - Root directory for relative favorites, watchlist, and log files
 - `RUST_LOG` - Logging level (for debugging)
 
 ## Troubleshooting
