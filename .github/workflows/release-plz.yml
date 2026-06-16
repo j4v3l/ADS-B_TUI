@@ -1,9 +1,16 @@
 name: Release Automation
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      command:
+        description: "release-plz command to run"
+        required: true
+        default: release-pr
+        type: choice
+        options:
+          - release-pr
+          - release
 
 permissions:
   contents: write
@@ -15,7 +22,7 @@ env:
 jobs:
   release-pr:
     name: Open Release PR
-    if: github.event_name == 'push'
+    if: inputs.command == 'release-pr'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,7 +42,7 @@ jobs:
 
   release:
     name: Publish Release
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: inputs.command == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

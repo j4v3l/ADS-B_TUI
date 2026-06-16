@@ -5,8 +5,9 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-  release:
-    types: [published]
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -110,12 +111,13 @@ jobs:
           path: adsb-tui-${{ matrix.name }}.tar.gz
 
   release:
-    name: Create Release
+    name: Publish GitHub Release
     needs: build-release
     runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout code
@@ -123,32 +125,117 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve release version
+        id: version
+        run: |
+          set -euo pipefail
+
+          metadata="$(cargo metadata --no-deps --format-version=1)"
+          package_id="$(jq -r '.workspace_default_members[0] // .workspace_members[0] // empty' <<<"$metadata")"
+          package_name="$(jq -r --arg package_id "$package_id" '.packages[] | select(.id == $package_id) | .name' <<<"$metadata")"
+          version="$(jq -r --arg package_id "$package_id" '.packages[] | select(.id == $package_id) | .version' <<<"$metadata")"
+
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "::error::Unable to resolve package version from cargo metadata"
+            exit 1
+          fi
+
+          tag="v${version}"
+          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Resolved $package_name $version ($tag)"
+
+      - name: Check release state
+        id: release-state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if ! grep -Eq "^## \[$VERSION\]( -|$)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md does not contain a section for $VERSION"
+            exit 1
+          fi
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists; skipping publish."
+          else
+            tag_commit="$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" || true)"
+            if [ -n "$tag_commit" ] && [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "::error::Tag $TAG points at $tag_commit, not this main commit $GITHUB_SHA"
+              exit 1
+            fi
+
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG does not exist yet; publishing after artifact validation."
+          fi
+
       - name: Download all artifacts
+        if: steps.release-state.outputs.release_exists != 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Generate release notes
-        uses: taiki-e/install-action@v2
-        with:
-          tool: git-cliff
-
-      - name: Generate release notes
-        run: git cliff --config .gitcliff.toml --tag ${{ github.event.release.tag_name }} -o release-notes.md
-
-      - name: Create release archives
+      - name: Validate release artifacts
+        if: steps.release-state.outputs.release_exists != 'true'
         run: |
-          cd artifacts
-          for dir in */; do
-            if [ -f "$dir"*.tar.gz ] || [ -f "$dir"*.zip ]; then
-              echo "Found artifact: $dir"
-            fi
-          done
+          set -euo pipefail
 
-      - name: Update release with binaries
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/**/*
-          body_path: release-notes.md
+          printf '%s\n' \
+            artifacts/adsb-tui-linux-x64/adsb-tui-linux-x64.tar.gz \
+            artifacts/adsb-tui-macos-arm64/adsb-tui-macos-arm64.tar.gz \
+            artifacts/adsb-tui-macos-x64/adsb-tui-macos-x64.tar.gz \
+            > expected-artifacts.txt
+
+          find artifacts -type f | sort > actual-artifacts.txt
+          if ! diff -u expected-artifacts.txt actual-artifacts.txt; then
+            echo "::error::Release artifacts did not match the expected archive set"
+            exit 1
+          fi
+
+      - name: Generate release notes
+        if: steps.release-state.outputs.release_exists != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## $TAG"
+            echo
+            awk -v version="$VERSION" '
+              $0 ~ "^## \\[" version "\\]( -|$)" { in_section = 1; next }
+              in_section && /^## \[/ { exit }
+              in_section { print }
+            ' CHANGELOG.md
+          } > release-notes.md
+
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::Generated release notes for $TAG are empty"
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        if: steps.release-state.outputs.release_exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$TAG" \
+            artifacts/adsb-tui-linux-x64/adsb-tui-linux-x64.tar.gz \
+            artifacts/adsb-tui-macos-arm64/adsb-tui-macos-arm64.tar.gz \
+            artifacts/adsb-tui-macos-x64/adsb-tui-macos-x64.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file release-notes.md
