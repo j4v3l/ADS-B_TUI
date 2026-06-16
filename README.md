@@ -6,9 +6,9 @@ A modern, fast, and user-friendly terminal interface for tracking aircraft using
 [![License](https://img.shields.io/badge/License-ADS--B--TUI--Non--Commercial-blue.svg)](https://github.com/j4v3l/ADS-B_TUI/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![MSRV](https://img.shields.io/badge/MSRV-1.70-blue.svg)](https://github.com/j4v3l/adsb-tui)
-[![GitHub Release](https://img.shields.io/github/v/release/j4v3l/ADS-B_TUI)](https://github.com/j4v3l/ADS-B_TUI/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/j4v3l/ADS-B_TUI/total.svg)](https://github.com/j4v3l/ADS-B_TUI/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/j4v3l/ADS-B_TUI.svg)](https://github.com/j4v3l/ADS-B_TUI/stargazers)
+[![GitHub Release](https://badgen.net/github/release/j4v3l/ADS-B_TUI)](https://github.com/j4v3l/ADS-B_TUI/releases/latest)
+[![Downloads](https://badgen.net/github/assets-dl/j4v3l/ADS-B_TUI)](https://github.com/j4v3l/ADS-B_TUI/releases)
+[![GitHub Stars](https://badgen.net/github/stars/j4v3l/ADS-B_TUI)](https://github.com/j4v3l/ADS-B_TUI/stargazers)
 
 ## 🖼️ Screenshots
 
